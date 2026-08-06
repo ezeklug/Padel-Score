@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "PadelScore"
 include(":app")
+include(":shared")
+include(":mobile")

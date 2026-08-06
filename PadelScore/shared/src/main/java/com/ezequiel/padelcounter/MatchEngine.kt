@@ -1,11 +1,21 @@
 package com.ezequiel.padelcounter
 
+fun formatTeamNameInput(value: String, maxLength: Int = 24): String {
+    var capitalizeNext = true
+    return buildString {
+        value.take(maxLength).forEach { character ->
+            append(if (capitalizeNext && character.isLetter()) character.uppercaseChar() else character)
+            capitalizeNext = character.isWhitespace()
+        }
+    }
+}
+
 data class MatchConfig(
     val teamA: String = "Mi Equipo",
     val teamB: String = "Rival",
-    val maxSets: Int = 1,
+    val maxSets: Int = 0,
     val advantage: Boolean = false,
-    val colorA: Int = 2,
+    val colorA: Int = 0,
     val colorB: Int = 1,
     val doubles: Boolean = true,
     val initialServerA: Boolean = true,
@@ -25,6 +35,7 @@ data class MatchState(
     val gameStartedAt: Long = startedAt,
     val setDurations: List<Long> = emptyList(),
     val gameDurations: List<Long> = emptyList(),
+    val setScores: List<String> = emptyList(),
 ) {
     val tieBreak: Boolean get() = gamesA == 6 && gamesB == 6
 }
@@ -64,7 +75,9 @@ object MatchEngine {
             setsB = next.setsB + if (teamA) 0 else 1,
             setStartedAt = now,
             setDurations = next.setDurations + (now - next.setStartedAt).coerceAtLeast(0),
+            setScores = next.setScores + "${next.gamesA}-${next.gamesB}",
         )
+        if (config.maxSets == 0) return withSet
         val setsNeeded = config.maxSets / 2 + 1
         return withSet.copy(finished = maxOf(withSet.setsA, withSet.setsB) >= setsNeeded)
     }

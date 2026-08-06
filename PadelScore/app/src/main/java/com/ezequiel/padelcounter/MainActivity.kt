@@ -1,5 +1,9 @@
 package com.ezequiel.padelcounter
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
@@ -43,17 +47,35 @@ import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("match", MODE_PRIVATE) }
+    private val syncReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = recreate()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContent { MaterialTheme { PadelApp(loadSaved(), loadHistory(), ::save, ::saveHistory) } }
+        migratePalette()
+        val openLatest = prefs.getBoolean("open_latest_detail", false)
+        prefs.edit().remove("open_latest_detail").apply()
+        setContent { MaterialTheme { PadelApp(loadSaved(), loadHistory(), openLatest, ::save, ::saveHistory) } }
+        if (prefs.getLong("sync_updated", 0L) == 0L) DataSync.publish(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        registerReceiver(syncReceiver, IntentFilter(ACTION_SYNCED), RECEIVER_NOT_EXPORTED)
+    }
+
+    override fun onStop() {
+        unregisterReceiver(syncReceiver)
+        super.onStop()
     }
 
     private fun save(saved: SavedMatch?) {
         prefs.edit().apply {
             if (saved == null) remove("current") else putString("current", saved.toJson().toString())
         }.apply()
+        DataSync.publish(this)
     }
 
     private fun loadSaved(): SavedMatch? = runCatching { savedFromJson(JSONObject(prefs.getString("current", null) ?: return null)) }.getOrNull()
@@ -70,18 +92,30 @@ class MainActivity : ComponentActivity() {
         val array = JSONArray()
         records.take(50).forEach { record -> array.put(record.saved.toJson().put("endedAt", record.endedAt)) }
         prefs.edit().putString("history", array.toString()).apply()
+        DataSync.publish(this)
+    }
+
+    private fun migratePalette() {
+        if (prefs.getBoolean("palette_v2", false)) return
+        fun migrate(json: JSONObject) { if (json.optInt("colorA", 2) == 2) json.put("colorA", 0) }
+        prefs.edit().apply {
+            prefs.getString("current", null)?.let { runCatching { JSONObject(it).also(::migrate).toString() }.getOrNull()?.let { value -> putString("current", value) } }
+            prefs.getString("history", null)?.let { raw -> runCatching { JSONArray(raw).also { array -> (0 until array.length()).forEach { migrate(array.getJSONObject(it)) } }.toString() }.getOrNull()?.let { value -> putString("history", value) } }
+            putBoolean("palette_v2", true)
+        }.apply()
     }
 }
 
 private fun savedFromJson(json: JSONObject) = SavedMatch(
-    MatchConfig(json.getString("a"), json.getString("b"), json.getInt("max"), json.getBoolean("adv"), json.optInt("colorA", 2), json.optInt("colorB", 1), json.optBoolean("doubles", true), json.optBoolean("serverA", true)),
+    MatchConfig(json.getString("a"), json.getString("b"), json.getInt("max"), json.getBoolean("adv"), json.optInt("colorA", 0), json.optInt("colorB", 1), json.optBoolean("doubles", true), json.optBoolean("serverA", true)),
     MatchState(
         pointsA = json.getInt("pa"), pointsB = json.getInt("pb"), gamesA = json.getInt("ga"), gamesB = json.getInt("gb"),
         setsA = json.getInt("sa"), setsB = json.getInt("sb"), finished = json.getBoolean("done"),
         completedGames = json.optInt("completedGames", 0), startedAt = json.optLong("startedAt", System.currentTimeMillis()),
         setStartedAt = json.optLong("setStartedAt", json.optLong("startedAt", System.currentTimeMillis())),
         gameStartedAt = json.optLong("gameStartedAt", json.optLong("startedAt", System.currentTimeMillis())),
-        setDurations = json.optJSONArray("setDurations").toLongList(), gameDurations = json.optJSONArray("gameDurations").toLongList()
+        setDurations = json.optJSONArray("setDurations").toLongList(), gameDurations = json.optJSONArray("gameDurations").toLongList(),
+        setScores = json.optJSONArray("setScores").toStringList()
     )
 )
 
@@ -94,28 +128,29 @@ data class SavedMatch(val config: MatchConfig, val state: MatchState) {
         put("sa", state.setsA); put("sb", state.setsB); put("done", state.finished)
         put("completedGames", state.completedGames)
         put("startedAt", state.startedAt); put("setStartedAt", state.setStartedAt); put("gameStartedAt", state.gameStartedAt)
-        put("setDurations", JSONArray(state.setDurations)); put("gameDurations", JSONArray(state.gameDurations))
+        put("setDurations", JSONArray(state.setDurations)); put("gameDurations", JSONArray(state.gameDurations)); put("setScores", JSONArray(state.setScores))
     }
 }
 
 data class HistoryRecord(val endedAt: Long, val saved: SavedMatch)
 
 private fun JSONArray?.toLongList(): List<Long> = if (this == null) emptyList() else (0 until length()).map { getLong(it) }
+private fun JSONArray?.toStringList(): List<String> = if (this == null) emptyList() else (0 until length()).map { getString(it) }
 
-private val Ink = Color(0xFF0E110F)
-private val Lime = Color(0xFFD7FF4F)
-private val Cyan = Color(0xFF4FA3FF)
-private val Muted = Color(0xFF9EA6A0)
-private val TeamColors = listOf(Lime, Cyan, Color(0xFFFF6B6B), Color(0xFFFFC857), Color(0xFFB892FF))
+private val Ink = Color(0xFF111820)
+private val Panel = Color(0xFF1B2530)
+private val Lime = Color(0xFF4EB3D3)
+private val Muted = Color(0xFFA5B0BD)
+private val TeamColors = listOf(Color(0xFFE6534E), Color(0xFF2878B5), Color(0xFF159A82), Color(0xFFE9A23B), Color(0xFF7959B8))
 
 @Composable
-private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, persist: (SavedMatch?) -> Unit, persistHistory: (List<HistoryRecord>) -> Unit) {
-    var screen by remember { mutableStateOf(if (initial == null) "setup" else "score") }
+private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, openLatest: Boolean, persist: (SavedMatch?) -> Unit, persistHistory: (List<HistoryRecord>) -> Unit) {
+    var screen by remember { mutableStateOf(if (openLatest && initialHistory.isNotEmpty()) "detail" else if (initial == null) "setup" else "score") }
     var config by remember { mutableStateOf(initial?.config ?: MatchConfig()) }
     var state by remember { mutableStateOf(initial?.state ?: MatchState()) }
     val history = remember { mutableStateListOf<MatchState>() }
     val records = remember { mutableStateListOf<HistoryRecord>().apply { addAll(initialHistory) } }
-    var selectedRecord by remember { mutableStateOf<Int?>(null) }
+    var selectedRecord by remember { mutableStateOf<Int?>(if (openLatest && initialHistory.isNotEmpty()) 0 else null) }
     var locked by remember { mutableStateOf(false) }
     val view = LocalView.current
 
@@ -143,14 +178,11 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
             "confirm" -> ConfirmScreen(
                 onCancel = { screen = "score" },
                 onConfirm = {
-                    if (state.finished) {
-                        records.add(0, HistoryRecord(System.currentTimeMillis(), SavedMatch(config, state)))
-                        persistHistory(records.toList())
-                        selectedRecord = 0
-                    }
-                    val wasFinished = state.finished
+                    records.add(0, HistoryRecord(System.currentTimeMillis(), SavedMatch(config, state.copy(finished = true))))
+                    persistHistory(records.toList())
+                    selectedRecord = 0
                     persist(null); config = MatchConfig(); state = MatchState(); history.clear(); locked = false
-                    screen = if (wasFinished) "detail" else "setup"
+                    screen = "detail"
                 }
             )
             else -> ScoreScreen(config, state,
@@ -186,7 +218,8 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, team
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Sets", color = Muted, fontSize = 10.sp, maxLines = 1, modifier = Modifier.width(36.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(1, 3, 5).forEach { n -> Choice(n.toString(), config.maxSets == n) { update(config.copy(maxSets = n)) } }
+                listOf(1, 3, 5).forEach { n -> Choice(n.toString(), config.maxSets == n, width = 29) { update(config.copy(maxSets = n)) } }
+                Choice("L", config.maxSets == 0, width = 29) { update(config.copy(maxSets = 0)) }
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -234,9 +267,9 @@ private fun TeamsScreen(config: MatchConfig, update: (MatchConfig) -> Unit, back
         Text("EQUIPOS", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.clickable(onClick = back).padding(3.dp))
         NameField(config.teamA, TeamColors[config.colorA]) { update(config.copy(teamA = it)) }
-        ColorPicker(config.colorA) { update(config.copy(colorA = it)) }
+        ColorPicker(config.colorA, config.colorB) { update(config.copy(colorA = it)) }
         NameField(config.teamB, TeamColors[config.colorB]) { update(config.copy(teamB = it)) }
-        ColorPicker(config.colorB) { update(config.copy(colorB = it)) }
+        ColorPicker(config.colorB, config.colorA) { update(config.copy(colorB = it)) }
         Box(
             Modifier.fillMaxWidth(.72f).height(22.dp).clip(RoundedCornerShape(6.dp)).background(Lime).clickable(onClick = back),
             contentAlignment = Alignment.Center
@@ -245,13 +278,10 @@ private fun TeamsScreen(config: MatchConfig, update: (MatchConfig) -> Unit, back
 }
 
 @Composable
-private fun ColorPicker(selected: Int, update: (Int) -> Unit) {
+private fun ColorPicker(selected: Int, unavailable: Int, update: (Int) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         TeamColors.forEachIndexed { index, color ->
-            Box(
-                Modifier.size(if (selected == index) 22.dp else 18.dp).clip(CircleShape).background(color)
-                    .clickable { update(index) }
-            )
+            Box(Modifier.size(22.dp).clip(CircleShape).background(if (selected == index) Color.White else Color.Transparent).padding(if (selected == index) 3.dp else 4.dp).clip(CircleShape).background(if (index == unavailable) color.copy(alpha = .22f) else color).clickable(enabled = index != unavailable) { update(index) })
         }
     }
 }
@@ -291,7 +321,7 @@ private fun HistoryScreen(records: List<HistoryRecord>, open: (Int) -> Unit, bac
 @Composable
 private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Unit, onDelete: () -> Unit, onBack: () -> Unit) {
     val saved = record.saved
-    val total = saved.state.setDurations.sum().takeIf { it > 0 } ?: (record.endedAt - saved.state.startedAt).coerceAtLeast(0)
+    val total = (record.endedAt - saved.state.startedAt).coerceAtLeast(0)
     var confirmDelete by remember(record.endedAt) { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 26.dp, vertical = 10.dp),
@@ -304,7 +334,15 @@ private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Un
         NameField(saved.config.teamB, TeamColors[saved.config.colorB]) { onUpdate(record.copy(saved = saved.copy(config = saved.config.copy(teamB = it)))) }
         Text("RESULTADO  ${saved.state.setsA}-${saved.state.setsB}", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Text("TOTAL  ${formatDuration(total)}", color = Color.White, fontSize = 11.sp)
-        saved.state.setDurations.forEachIndexed { index, duration -> Text("Set ${index + 1}  ${formatDuration(duration)}", color = Muted, fontSize = 10.sp) }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 5.dp)) {
+            Text("SET", color = Muted, fontSize = 7.sp, modifier = Modifier.weight(1f))
+            Text("RESULTADO", color = Muted, fontSize = 7.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1.4f))
+            Text("TIEMPO", color = Muted, fontSize = 7.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+        }
+        saved.state.setDurations.forEachIndexed { index, duration -> WatchSetRow(index + 1, saved.state.setScores.getOrElse(index) { "—" }, formatDuration(duration), false) }
+        if (saved.state.gamesA != 0 || saved.state.gamesB != 0 || saved.state.pointsA != 0 || saved.state.pointsB != 0) {
+            WatchSetRow(saved.state.setDurations.size + 1, "${saved.state.gamesA}-${saved.state.gamesB}", formatDuration((record.endedAt - saved.state.setStartedAt).coerceAtLeast(0)), true)
+        }
         val games = saved.state.gameDurations
         if (games.isNotEmpty()) Text("${games.size} games · Prom. ${formatDuration(games.average().toLong())}", color = Muted, fontSize = 9.sp)
         Box(
@@ -314,6 +352,15 @@ private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Un
         ) {
             Text(if (confirmDelete) "CONFIRMAR" else "ELIMINAR", color = Color(0xFFFF777D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+@Composable
+private fun WatchSetRow(number: Int, score: String, duration: String, partial: Boolean) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(if (partial) Lime.copy(alpha = .12f) else Panel).padding(horizontal = 5.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("${if (partial) "*" else ""}$number", color = if (partial) Lime else Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(score, color = if (partial) Lime else Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1.4f))
+        Text(duration, color = Color.White, fontSize = 8.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
     }
 }
 
@@ -331,17 +378,17 @@ private fun formatLocalDate(timestamp: Long, pattern: String): String =
 @Composable
 private fun NameField(value: String, color: Color, update: (String) -> Unit) {
     BasicTextField(
-        value = value, onValueChange = { update(it.take(14)) }, singleLine = true,
+        value = value, onValueChange = { update(formatTeamNameInput(it, 14)) }, singleLine = true,
         textStyle = TextStyle(color = Color.White, fontSize = 13.sp, textAlign = TextAlign.Center),
         modifier = Modifier.fillMaxWidth().height(27.dp).clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = .16f)).padding(4.dp)
     )
 }
 
 @Composable
-private fun Choice(label: String, selected: Boolean, click: () -> Unit) {
+private fun Choice(label: String, selected: Boolean, width: Int = 37, click: () -> Unit) {
     Box(
-        Modifier.size(width = 37.dp, height = 26.dp).clip(RoundedCornerShape(6.dp))
-            .background(if (selected) Lime else Color(0xFF292E2A)).clickable(onClick = click),
+        Modifier.size(width = width.dp, height = 26.dp).clip(RoundedCornerShape(6.dp))
+            .background(if (selected) Lime else Panel).clickable(onClick = click),
         contentAlignment = Alignment.Center
     ) { Text(label, color = if (selected) Ink else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 }
@@ -425,8 +472,8 @@ private fun ConfirmScreen(onCancel: () -> Unit, onConfirm: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("¿Terminar partido?", color = Color.White, fontSize = 16.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Choice("NO", false, onCancel)
-            Choice("SI", true, onConfirm)
+            Choice("NO", false, click = onCancel)
+            Choice("SI", true, click = onConfirm)
         }
     }
 }

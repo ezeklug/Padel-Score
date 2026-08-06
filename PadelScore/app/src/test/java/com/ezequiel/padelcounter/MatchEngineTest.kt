@@ -6,6 +6,11 @@ import org.junit.Test
 class MatchEngineTest {
     private val advantage = MatchConfig(maxSets = 3, advantage = true)
 
+    @Test fun `team names capitalize first letter and words`() {
+        assertEquals("Mi Equipo Rojo", formatTeamNameInput("mi equipo rojo"))
+        assertEquals("EZE Team", formatTeamNameInput("eZE team"))
+    }
+
     @Test fun `game needs two point margin with advantage`() {
         var state = MatchState(pointsA = 3, pointsB = 3)
         state = MatchEngine.point(state, true, advantage)
