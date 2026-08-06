@@ -141,6 +141,9 @@ private val Ink = Color(0xFF111820)
 private val Panel = Color(0xFF1B2530)
 private val Lime = Color(0xFF4EB3D3)
 private val Muted = Color(0xFFA5B0BD)
+private val Win = Color(0xFF35B779)
+private val Draw = Color(0xFFF2B84B)
+private val Loss = Color(0xFFE45C62)
 private val TeamColors = listOf(Color(0xFFE6534E), Color(0xFF2878B5), Color(0xFF159A82), Color(0xFFE9A23B), Color(0xFF7959B8))
 
 @Composable
@@ -168,7 +171,8 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
                 screen = "score"
             })
             "teams" -> TeamsScreen(config, { config = it }, { screen = "setup" })
-            "history" -> HistoryScreen(records, { index -> selectedRecord = index; screen = "detail" }, { screen = "setup" })
+            "history" -> HistoryScreen(records, { index -> selectedRecord = index; screen = "detail" }, { screen = "global" }, { screen = "setup" })
+            "global" -> GlobalStatsWatch(records) { screen = "history" }
             "detail" -> selectedRecord?.let { index ->
                 HistoryDetail(records[index],
                     onUpdate = { updated -> records[index] = updated; persistHistory(records.toList()) },
@@ -215,11 +219,11 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, team
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         Text("PUNTO PADEL", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Sets", color = Muted, fontSize = 10.sp, maxLines = 1, modifier = Modifier.width(36.dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Sets", color = Muted, fontSize = 9.sp, maxLines = 1)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(1, 3, 5).forEach { n -> Choice(n.toString(), config.maxSets == n, width = 29) { update(config.copy(maxSets = n)) } }
-                Choice("L", config.maxSets == 0, width = 29) { update(config.copy(maxSets = 0)) }
+                listOf(1, 3, 5).forEach { n -> Choice(n.toString(), config.maxSets == n, width = 28) { update(config.copy(maxSets = n)) } }
+                Choice("L", config.maxSets == 0, width = 36) { update(config.copy(maxSets = 0)) }
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -287,7 +291,7 @@ private fun ColorPicker(selected: Int, unavailable: Int, update: (Int) -> Unit) 
 }
 
 @Composable
-private fun HistoryScreen(records: List<HistoryRecord>, open: (Int) -> Unit, back: () -> Unit) {
+private fun HistoryScreen(records: List<HistoryRecord>, open: (Int) -> Unit, global: () -> Unit, back: () -> Unit) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -295,18 +299,20 @@ private fun HistoryScreen(records: List<HistoryRecord>, open: (Int) -> Unit, bac
     ) {
         Text("<  HISTORIAL", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.clickable(onClick = back).padding(horizontal = 8.dp, vertical = 4.dp))
+        Text("RESUMEN GLOBAL", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Panel).clickable(onClick = global).padding(horizontal = 10.dp, vertical = 4.dp))
         if (records.isEmpty()) Text("Sin partidos", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 35.dp))
         records.chunked(2).forEachIndexed { rowIndex, rowRecords ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 rowRecords.forEachIndexed { columnIndex, record ->
                     val saved = record.saved
+                    val outcome = when { saved.state.setsA > saved.state.setsB -> Win; saved.state.setsA < saved.state.setsB -> Loss; else -> Draw }
                     Column(
                         Modifier.weight(1f).height(72.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF292E2A))
                             .clickable { open(rowIndex * 2 + columnIndex) }.padding(5.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Text("${saved.state.setsA}-${saved.state.setsB}", color = Lime, fontSize = 15.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold)
+                        Text("${saved.state.setsA}-${saved.state.setsB}", color = outcome, fontSize = 15.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(outcome.copy(alpha = .14f)).padding(horizontal = 7.dp, vertical = 1.dp))
                         Text(saved.config.teamA, color = TeamColors[saved.config.colorA], fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         Text(saved.config.teamB, color = TeamColors[saved.config.colorB], fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         Text(formatLocalDate(record.endedAt, "dd/MM/yy"), color = Color.White, fontSize = 8.sp, lineHeight = 10.sp)
@@ -315,6 +321,32 @@ private fun HistoryScreen(records: List<HistoryRecord>, open: (Int) -> Unit, bac
                 if (rowRecords.size == 1) Spacer(Modifier.weight(1f))
             }
         }
+    }
+}
+
+@Composable
+private fun GlobalStatsWatch(records: List<HistoryRecord>, back: () -> Unit) {
+    val wins = records.count { it.saved.state.setsA > it.saved.state.setsB }; val losses = records.count { it.saved.state.setsA < it.saved.state.setsB }; val draws = records.size - wins - losses
+    val setsA = records.sumOf { it.saved.state.setsA }; val setsB = records.sumOf { it.saved.state.setsB }; val games = records.sumOf { it.saved.state.completedGames }
+    val total = records.sumOf { (it.endedAt - it.saved.state.startedAt).coerceAtLeast(0) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("<  RESUMEN", color = Lime, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = back).padding(3.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            WatchGlobalResult("G", wins, Win, Modifier.weight(1f)); WatchGlobalResult("E", draws, Draw, Modifier.weight(1f)); WatchGlobalResult("P", losses, Loss, Modifier.weight(1f))
+        }
+        Text("${records.size} PARTIDOS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("SETS  $setsA-$setsB", color = Muted, fontSize = 9.sp)
+        Text("$games GAMES", color = Muted, fontSize = 9.sp)
+        Text("TOTAL  ${formatDuration(total)}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("PROM.  ${formatDuration(if (records.isEmpty()) 0 else total / records.size)}", color = Muted, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun WatchGlobalResult(label: String, value: Int, color: Color, modifier: Modifier) {
+    Column(modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = .15f)).padding(vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value.toString(), color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = Color.White, fontSize = 7.sp)
     }
 }
 

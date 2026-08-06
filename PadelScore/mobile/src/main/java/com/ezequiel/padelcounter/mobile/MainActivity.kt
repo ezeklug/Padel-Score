@@ -1,11 +1,14 @@
 package com.ezequiel.padelcounter.mobile
 
 import android.content.*
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Bundle
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -18,8 +21,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Scoreboard
@@ -55,6 +60,9 @@ private val Accent = Color(0xFF4EB3D3)
 private val Coral = Color(0xFFE6534E)
 private val Muted = Color(0xFFA5B0BD)
 private val Divider = Color(0xFF344250)
+private val Win = Color(0xFF35B779)
+private val Draw = Color(0xFFF2B84B)
+private val Loss = Color(0xFFE45C62)
 private val Palette = listOf(Coral, Color(0xFF2878B5), Color(0xFF159A82), Color(0xFFE9A23B), Color(0xFF7959B8))
 
 class MainActivity : ComponentActivity() {
@@ -107,6 +115,7 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, op
     val records = remember { mutableStateListOf<PhoneRecord>().apply { addAll(initialHistory) } }
     var tab by remember { mutableIntStateOf(if (openLatest && initialHistory.isNotEmpty()) 2 else if (initial == null) 0 else 1) }
     var detailIndex by remember { mutableStateOf<Int?>(if (openLatest && initialHistory.isNotEmpty()) 0 else null) }
+    var showGlobal by remember { mutableStateOf(false) }
     val undo = remember { mutableStateListOf<MatchState>() }
 
     Scaffold(
@@ -124,9 +133,9 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, op
         },
         bottomBar = {
             NavigationBar(containerColor = Panel, tonalElevation = 8.dp) {
-                NavigationBarItem(tab == 0, { tab = 0; detailIndex = null }, icon = { Icon(Icons.Default.AddCircle, null) }, label = { Text("Nuevo") }, colors = navColors())
-                NavigationBarItem(tab == 1, { tab = 1; detailIndex = null }, icon = { Icon(Icons.Default.Scoreboard, null) }, label = { Text("Tanteador") }, colors = navColors())
-                NavigationBarItem(tab == 2, { tab = 2; detailIndex = null }, icon = { Icon(Icons.Default.History, null) }, label = { Text("Historial") }, colors = navColors())
+                NavigationBarItem(tab == 0, { tab = 0; detailIndex = null; showGlobal = false }, icon = { Icon(Icons.Default.AddCircle, null) }, label = { Text("Nuevo") }, colors = navColors())
+                NavigationBarItem(tab == 1, { tab = 1; detailIndex = null; showGlobal = false }, icon = { Icon(Icons.Default.Scoreboard, null) }, label = { Text("Tanteador") }, colors = navColors())
+                NavigationBarItem(tab == 2, { tab = 2; detailIndex = null; showGlobal = false }, icon = { Icon(Icons.Default.History, null) }, label = { Text("Historial") }, colors = navColors())
             }
         }
     ) { padding ->
@@ -148,7 +157,8 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, op
                     update = { records[detailIndex!!] = it; persist(current, records) },
                     delete = { records.removeAt(detailIndex!!); persist(current, records); detailIndex = null },
                     back = { detailIndex = null })
-                else -> HistoryPhone(records) { detailIndex = it }
+                showGlobal -> GlobalStatsPhone(records) { showGlobal = false }
+                else -> HistoryPhone(records, { detailIndex = it }) { showGlobal = true }
             }
         }
     }
@@ -263,14 +273,15 @@ private fun PhoneTeam(match: PhoneMatch, teamA: Boolean, point: (Boolean) -> Uni
 @Composable private fun EmptyScore(open: () -> Unit) { Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Text("No hay un partido activo", color = Muted); Button(open, Modifier.padding(top = 16.dp)) { Text("Crear partido") } } }
 
 @Composable
-private fun HistoryPhone(records: List<PhoneRecord>, open: (Int) -> Unit) {
+private fun HistoryPhone(records: List<PhoneRecord>, open: (Int) -> Unit, global: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Column(Modifier.padding(bottom = 6.dp)) { Text("HISTORIAL", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold); Text("Partidos jugados", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) } }
+        item { Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.Bottom) { Column(Modifier.weight(1f)) { Text("HISTORIAL", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold); Text("Partidos jugados", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) }; FilledTonalButton(global, shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 12.dp)) { Icon(Icons.Default.Analytics, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Resumen") } } }
         if (records.isEmpty()) item { Text("Todavia no hay partidos finalizados.", color = Muted) }
         itemsIndexed(records) { index, record ->
             val m = record.match
+            val outcome = when { m.state.setsA > m.state.setsB -> Win; m.state.setsA < m.state.setsB -> Loss; else -> Draw }
             Row(Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(7.dp)).background(Panel).clickable { open(index) }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF243C49)), contentAlignment = Alignment.Center) { Text("${m.state.setsA}-${m.state.setsB}", color = Accent, fontSize = 17.sp, fontWeight = FontWeight.Black) }
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(outcome.copy(alpha = .18f)), contentAlignment = Alignment.Center) { Text("${m.state.setsA}-${m.state.setsB}", color = outcome, fontSize = 17.sp, fontWeight = FontWeight.Black) }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) { Text("${m.config.teamA} vs ${m.config.teamB}", color = Ink, fontWeight = FontWeight.Bold, maxLines = 1); Text(formatDate(record.endedAt), color = Muted, fontSize = 12.sp) }
                 Text("Ver", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -280,10 +291,26 @@ private fun HistoryPhone(records: List<PhoneRecord>, open: (Int) -> Unit) {
 }
 
 @Composable
+private fun GlobalStatsPhone(records: List<PhoneRecord>, back: () -> Unit) {
+    val wins = records.count { it.match.state.setsA > it.match.state.setsB }; val losses = records.count { it.match.state.setsA < it.match.state.setsB }; val draws = records.size - wins - losses
+    val setsWon = records.sumOf { it.match.state.setsA }; val setsLost = records.sumOf { it.match.state.setsB }
+    val games = records.sumOf { it.match.state.completedGames }; val total = records.sumOf { (it.endedAt - it.match.state.startedAt).coerceAtLeast(0) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { TextButton(back) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Historial") } }
+        item { Text("Estadisticas globales", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) { GlobalResult("Ganados", wins, Win, Modifier.weight(1f)); GlobalResult("Empates", draws, Draw, Modifier.weight(1f)); GlobalResult("Perdidos", losses, Loss, Modifier.weight(1f)) } }
+        item { Surface(Modifier.fillMaxWidth(), color = Panel, shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Divider)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { GlobalLine("Partidos jugados", records.size.toString()); GlobalLine("Sets", "$setsWon - $setsLost"); GlobalLine("Games completados", games.toString()); GlobalLine("Tiempo en cancha", formatDuration(total)); GlobalLine("Promedio por partido", formatDuration(if (records.isEmpty()) 0 else total / records.size)) } } }
+    }
+}
+
+@Composable private fun GlobalResult(label: String, value: Int, color: Color, modifier: Modifier) { Column(modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = .14f)).padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text(value.toString(), color = color, fontSize = 28.sp, fontWeight = FontWeight.Black); Text(label, color = Ink, fontSize = 12.sp) } }
+@Composable private fun GlobalLine(label: String, value: String) { Row(Modifier.fillMaxWidth()) { Text(label, color = Muted, modifier = Modifier.weight(1f)); Text(value, color = Ink, fontWeight = FontWeight.Bold) } }
+
+@Composable
 private fun DetailPhone(record: PhoneRecord, update: (PhoneRecord) -> Unit, delete: () -> Unit, back: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }; val m = record.match; val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { TextButton(back) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Volver") }; Spacer(Modifier.weight(1f)); FilledTonalIconButton(onClick = { shareMatchImage(context, record) }) { Icon(Icons.Default.Share, "Compartir partido") } } }
+        item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { TextButton(back) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Volver") }; Spacer(Modifier.weight(1f)); FilledTonalIconButton(onClick = { saveMatchImage(context, record) }) { Icon(Icons.Default.Download, "Guardar en Galeria") }; Spacer(Modifier.width(8.dp)); FilledTonalIconButton(onClick = { shareMatchImage(context, record) }) { Icon(Icons.Default.Share, "Compartir partido") } } }
         item { Text(formatDate(record.endedAt), color = Muted) }
         item { OutlinedTextField(m.config.teamA, { update(record.copy(match = m.copy(config = m.config.copy(teamA = formatTeamNameInput(it))))) }, label = { Text("Equipo A") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
         item { OutlinedTextField(m.config.teamB, { update(record.copy(match = m.copy(config = m.config.copy(teamB = formatTeamNameInput(it))))) }, label = { Text("Equipo B") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
@@ -297,6 +324,7 @@ private fun DetailPhone(record: PhoneRecord, update: (PhoneRecord) -> Unit, dele
 private fun MatchStatsTable(record: PhoneRecord) {
     val state = record.match.state
     val hasPartial = state.gamesA != 0 || state.gamesB != 0 || state.pointsA != 0 || state.pointsB != 0
+    val partialPoints = "${MatchEngine.pointLabel(state.pointsA, state.pointsB, state.tieBreak, record.match.config.advantage)}-${MatchEngine.pointLabel(state.pointsB, state.pointsA, state.tieBreak, record.match.config.advantage)}"
     Surface(Modifier.fillMaxWidth(), color = Panel, shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Divider)) {
         Column {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
@@ -305,7 +333,7 @@ private fun MatchStatsTable(record: PhoneRecord) {
                 Text("DURACION", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
             }
             state.setDurations.forEachIndexed { index, duration -> SetStatsRow(index + 1, state.setScores.getOrElse(index) { "—" }, formatDuration(duration), false) }
-            if (hasPartial) SetStatsRow(state.setDurations.size + 1, "${state.gamesA}-${state.gamesB}", formatDuration((record.endedAt - state.setStartedAt).coerceAtLeast(0)), true)
+            if (hasPartial) SetStatsRow(state.setDurations.size + 1, "${state.gamesA}-${state.gamesB} · $partialPoints", formatDuration((record.endedAt - state.setStartedAt).coerceAtLeast(0)), true)
             Box(Modifier.fillMaxWidth().height(1.dp).background(Divider))
             Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text("Tiempo total", color = Muted, fontSize = 12.sp); Text("${state.gameDurations.size} games jugados", color = Muted, fontSize = 11.sp) }
@@ -325,7 +353,7 @@ private fun SetStatsRow(number: Int, score: String, duration: String, partial: B
 }
 
 private fun formatDuration(ms: Long): String { val s = ms / 1000; return "%d:%02d".format(s / 60, s % 60) }
-private fun shareMatchImage(context: Context, record: PhoneRecord) {
+private fun createMatchImage(context: Context, record: PhoneRecord): File {
     val bitmap = Bitmap.createBitmap(1080, 1350, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap); val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     val state = record.match.state; val config = record.match.config
@@ -346,22 +374,45 @@ private fun shareMatchImage(context: Context, record: PhoneRecord) {
     paint.color = android.graphics.Color.rgb(52, 66, 80); canvas.drawRect(96f, 520f, 984f, 522f, paint)
     text("DURACION", 120f, 610f, 26f, android.graphics.Color.rgb(165, 176, 189), true)
     text(formatDuration((record.endedAt - state.startedAt).coerceAtLeast(0)), 960f, 610f, 48f, android.graphics.Color.WHITE, true, Paint.Align.RIGHT)
-    var y = 705f
-    state.setDurations.take(5).forEachIndexed { index, duration ->
+    text("SET", 120f, 690f, 24f, android.graphics.Color.rgb(165, 176, 189), true)
+    text("RESULTADO", 540f, 690f, 24f, android.graphics.Color.rgb(165, 176, 189), true, Paint.Align.CENTER)
+    text("DURACION", 960f, 690f, 24f, android.graphics.Color.rgb(165, 176, 189), true, Paint.Align.RIGHT)
+    var y = 755f
+    state.setDurations.take(7).forEachIndexed { index, duration ->
         text("Set ${index + 1}", 120f, y, 32f, android.graphics.Color.WHITE, true)
+        text(state.setScores.getOrElse(index) { "—" }, 540f, y, 34f, android.graphics.Color.WHITE, true, Paint.Align.CENTER)
         text(formatDuration(duration), 960f, y, 32f, android.graphics.Color.rgb(165, 176, 189), align = Paint.Align.RIGHT); y += 66f
     }
     if (state.gamesA != 0 || state.gamesB != 0 || state.pointsA != 0 || state.pointsB != 0) {
-        text("ULTIMO SET INCOMPLETO", 120f, y + 20f, 25f, android.graphics.Color.rgb(78, 179, 211), true)
-        text("Games ${state.gamesA}-${state.gamesB}", 120f, y + 76f, 36f, android.graphics.Color.WHITE, true)
         val pa = MatchEngine.pointLabel(state.pointsA, state.pointsB, state.tieBreak, config.advantage); val pb = MatchEngine.pointLabel(state.pointsB, state.pointsA, state.tieBreak, config.advantage)
-        text("Puntos $pa-$pb", 960f, y + 76f, 36f, android.graphics.Color.WHITE, true, Paint.Align.RIGHT)
+        text("Set ${state.setDurations.size + 1}*", 120f, y, 32f, android.graphics.Color.rgb(78, 179, 211), true)
+        text("${state.gamesA}-${state.gamesB} · $pa-$pb", 540f, y, 32f, android.graphics.Color.rgb(78, 179, 211), true, Paint.Align.CENTER)
+        text(formatDuration((record.endedAt - state.setStartedAt).coerceAtLeast(0)), 960f, y, 32f, android.graphics.Color.rgb(78, 179, 211), true, Paint.Align.RIGHT)
     }
     text("${state.gameDurations.size} games jugados", 540f, 1215f, 28f, android.graphics.Color.rgb(165, 176, 189), align = Paint.Align.CENTER)
     val directory = File(context.cacheDir, "shared_matches").apply { mkdirs() }; val file = File(directory, "punto-padel-${record.endedAt}.png")
     FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle()
+    return file
+}
+
+private fun shareMatchImage(context: Context, record: PhoneRecord) {
+    val file = createMatchImage(context, record)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val intent = Intent(Intent.ACTION_SEND).apply { type = "image/png"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     context.startActivity(Intent.createChooser(intent, "Compartir partido"))
+}
+
+private fun saveMatchImage(context: Context, record: PhoneRecord) {
+    val file = createMatchImage(context, record)
+    val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, "Punto-Padel-${record.endedAt}.png")
+        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Punto Padel")
+    }
+    val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+    if (uri != null) {
+        context.contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
+        Toast.makeText(context, "Imagen guardada en Galeria", Toast.LENGTH_SHORT).show()
+    } else Toast.makeText(context, "No se pudo guardar la imagen", Toast.LENGTH_SHORT).show()
 }
 private fun formatDate(ms: Long): String = SimpleDateFormat("dd/MM/yyyy · HH:mm", Locale.getDefault()).apply { timeZone = TimeZone.getTimeZone("America/Argentina/Buenos_Aires") }.format(Date(ms))
