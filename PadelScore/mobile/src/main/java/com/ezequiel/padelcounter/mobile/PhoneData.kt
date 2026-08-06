@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import com.ezequiel.padelcounter.MatchConfig
 import com.ezequiel.padelcounter.MatchState
+import com.ezequiel.padelcounter.Sport
 import com.google.android.gms.wearable.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,6 +20,7 @@ object PhoneCodec {
         val c = match.config; val s = match.state
         put("a", c.teamA); put("b", c.teamB); put("max", c.maxSets); put("adv", c.advantage)
         put("colorA", c.colorA); put("colorB", c.colorB); put("doubles", c.doubles); put("serverA", c.initialServerA)
+        put("sport", c.sport.name)
         put("pa", s.pointsA); put("pb", s.pointsB); put("ga", s.gamesA); put("gb", s.gamesB)
         put("sa", s.setsA); put("sb", s.setsB); put("done", s.finished); put("completedGames", s.completedGames)
         put("startedAt", s.startedAt); put("setStartedAt", s.setStartedAt); put("gameStartedAt", s.gameStartedAt)
@@ -27,7 +29,7 @@ object PhoneCodec {
     }
 
     fun matchFromJson(json: JSONObject) = PhoneMatch(
-        MatchConfig(json.getString("a"), json.getString("b"), json.getInt("max"), json.getBoolean("adv"), json.optInt("colorA", 0), json.optInt("colorB", 1), json.optBoolean("doubles", true), json.optBoolean("serverA", true)),
+        MatchConfig(json.getString("a"), json.getString("b"), json.getInt("max"), json.getBoolean("adv"), json.optInt("colorA", 0), json.optInt("colorB", 1), json.optBoolean("doubles", true), json.optBoolean("serverA", true), runCatching { Sport.valueOf(json.optString("sport", Sport.PADEL.name)) }.getOrDefault(Sport.PADEL)),
         MatchState(
             pointsA = json.getInt("pa"), pointsB = json.getInt("pb"), gamesA = json.getInt("ga"), gamesB = json.getInt("gb"),
             setsA = json.getInt("sa"), setsB = json.getInt("sb"), finished = json.getBoolean("done"), completedGames = json.optInt("completedGames", 0),
@@ -55,7 +57,7 @@ object PhoneCodec {
 object MobileSync {
     fun publish(context: Context) {
         val prefs = context.getSharedPreferences("match", Context.MODE_PRIVATE)
-        val updatedAt = System.currentTimeMillis()
+        val updatedAt = maxOf(System.currentTimeMillis(), prefs.getLong("sync_updated", 0L) + 1L)
         prefs.edit().putLong("sync_updated", updatedAt).apply()
         val request = PutDataMapRequest.create(SYNC_PATH).apply {
             dataMap.putString("current", prefs.getString("current", null) ?: "")

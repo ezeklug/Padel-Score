@@ -1,9 +1,14 @@
-# Punto Padel
+# Tanteo
 
-Aplicacion Android para llevar el tanteo de padel o tenis desde un telefono y un reloj Wear OS.
+Aplicacion Android multideporte para registrar partidos desde un telefono y un reloj Wear OS.
 
 ## Funciones
 
+- Seleccion de padel, tenis, futbol 5, futbol 7 o futbol 11.
+- Historial y resumen global independientes para cada deporte.
+- Tanteador de goles y cronometro libre para futbol.
+- Selector de deporte persistente en el telefono y pantalla inicial de deportes en el reloj.
+- Colores fijos: rojo para Mi Equipo y azul para Rival.
 - Partidos de 1, 3 o 5 sets y modo libre sin cantidad predeterminada.
 - Cierre manual con empates, sets, games o puntos inconclusos.
 - Game con ventaja o punto de oro y tie-break automatico.
@@ -13,7 +18,7 @@ Aplicacion Android para llevar el tanteo de padel o tenis desde un telefono y un
 - Recuperacion del partido si una app se cierra.
 - Historial con fecha, resultados y tiempos por set y game.
 - Imagen de estadisticas para guardar o compartir.
-- Registro opcional desde el reloj de ritmo cardiaco, distancia estimada y calorias mediante Wear OS Health Services.
+- Registro para todos los deportes desde el reloj de ritmo cardiaco, distancia estimada, pasos y calorias mediante Wear OS Health Services.
 - Sincronizacion bidireccional entre reloj y telefono.
 
 ## Modulos

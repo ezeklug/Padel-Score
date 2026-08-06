@@ -17,7 +17,7 @@ const val ACTION_SYNCED = "com.ezequiel.padelcounter.SYNCED"
 object DataSync {
     fun publish(context: Context) {
         val prefs = context.getSharedPreferences("match", Context.MODE_PRIVATE)
-        val updatedAt = System.currentTimeMillis()
+        val updatedAt = maxOf(System.currentTimeMillis(), prefs.getLong("sync_updated", 0L) + 1L)
         prefs.edit().putLong("sync_updated", updatedAt).apply()
         val request = PutDataMapRequest.create(SYNC_PATH).apply {
             dataMap.putString("current", prefs.getString("current", null) ?: "")

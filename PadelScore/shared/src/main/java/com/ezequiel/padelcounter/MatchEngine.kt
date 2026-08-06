@@ -10,6 +10,17 @@ fun formatTeamNameInput(value: String, maxLength: Int = 24): String {
     }
 }
 
+enum class Sport(val displayName: String) {
+    PADEL("Padel"),
+    TENNIS("Tenis"),
+    FOOTBALL_5("Futbol 5"),
+    FOOTBALL_7("Futbol 7"),
+    FOOTBALL_11("Futbol 11");
+
+    val isFootball: Boolean get() = name.startsWith("FOOTBALL")
+    val familyName: String get() = if (isFootball) "Futbol" else displayName
+}
+
 data class MatchConfig(
     val teamA: String = "Mi Equipo",
     val teamB: String = "Rival",
@@ -19,6 +30,7 @@ data class MatchConfig(
     val colorB: Int = 1,
     val doubles: Boolean = true,
     val initialServerA: Boolean = true,
+    val sport: Sport = Sport.PADEL,
 )
 
 data class MatchState(
