@@ -94,13 +94,13 @@ class MainActivity : ComponentActivity() {
         val array = JSONArray(prefs.getString("history", "[]"))
         (0 until array.length()).map { index ->
             val json = array.getJSONObject(index)
-            HistoryRecord(json.getLong("endedAt"), savedFromJson(json))
+            HistoryRecord(json.getLong("endedAt"), savedFromJson(json), json.optBoolean("manual", false))
         }
     }.getOrDefault(emptyList())
 
     private fun saveHistory(records: List<HistoryRecord>) {
         val array = JSONArray()
-        records.take(50).forEach { record -> array.put(record.saved.toJson().put("endedAt", record.endedAt)) }
+        records.take(50).forEach { record -> array.put(record.saved.toJson().put("endedAt", record.endedAt).put("manual", record.manuallyEntered)) }
         prefs.edit().putString("history", array.toString()).apply()
         DataSync.publish(this)
     }
@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun savedFromJson(json: JSONObject) = SavedMatch(
-    MatchConfig(json.getString("a"), json.getString("b"), json.getInt("max"), json.getBoolean("adv"), json.optInt("colorA", 0), json.optInt("colorB", 1), json.optBoolean("doubles", true), json.optBoolean("serverA", true), runCatching { Sport.valueOf(json.optString("sport", Sport.PADEL.name)) }.getOrDefault(Sport.PADEL)),
+    MatchConfig(json.getString("a"), json.getString("b"), json.getInt("max"), json.getBoolean("adv"), json.optInt("colorA", 0), json.optInt("colorB", 1), json.optBoolean("doubles", true), json.optBoolean("serverA", true), runCatching { Sport.valueOf(json.optString("sport", Sport.PADEL.name)) }.getOrDefault(Sport.PADEL), json.optString("userPlayer", "Yo"), json.optJSONArray("teamAPlayers").toStringList(), json.optJSONArray("teamBPlayers").toStringList()),
     MatchState(
         pointsA = json.getInt("pa"), pointsB = json.getInt("pb"), gamesA = json.getInt("ga"), gamesB = json.getInt("gb"),
         setsA = json.getInt("sa"), setsB = json.getInt("sb"), finished = json.getBoolean("done"),
@@ -128,7 +128,8 @@ private fun savedFromJson(json: JSONObject) = SavedMatch(
         setDurations = json.optJSONArray("setDurations").toLongList(), gameDurations = json.optJSONArray("gameDurations").toLongList(),
         setScores = json.optJSONArray("setScores").toStringList(), averageHeartRate = json.optDouble("hrAvg", 0.0),
         maxHeartRate = json.optDouble("hrMax", 0.0), distanceMeters = json.optDouble("distance", 0.0), calories = json.optDouble("calories", 0.0),
-        steps = json.optLong("steps", 0), distanceEstimated = json.optBoolean("distanceEstimated", false)
+        steps = json.optLong("steps", 0), distanceEstimated = json.optBoolean("distanceEstimated", false),
+        goalEvents = json.optJSONArray("goalEvents").toGoalEvents()
     )
 )
 
@@ -138,19 +139,22 @@ data class SavedMatch(val config: MatchConfig, val state: MatchState) {
         put("colorA", config.colorA); put("colorB", config.colorB)
         put("doubles", config.doubles); put("serverA", config.initialServerA)
         put("sport", config.sport.name)
+        put("userPlayer", config.userPlayer); put("teamAPlayers", JSONArray(config.teamAPlayers)); put("teamBPlayers", JSONArray(config.teamBPlayers))
         put("pa", state.pointsA); put("pb", state.pointsB); put("ga", state.gamesA); put("gb", state.gamesB)
         put("sa", state.setsA); put("sb", state.setsB); put("done", state.finished)
         put("completedGames", state.completedGames)
         put("startedAt", state.startedAt); put("setStartedAt", state.setStartedAt); put("gameStartedAt", state.gameStartedAt)
         put("setDurations", JSONArray(state.setDurations)); put("gameDurations", JSONArray(state.gameDurations)); put("setScores", JSONArray(state.setScores))
+        put("goalEvents", JSONArray().apply { state.goalEvents.forEach { put(JSONObject().put("teamA", it.teamA).put("elapsed", it.elapsedMillis)) } })
         put("hrAvg", state.averageHeartRate); put("hrMax", state.maxHeartRate); put("distance", state.distanceMeters); put("calories", state.calories); put("steps", state.steps); put("distanceEstimated", state.distanceEstimated)
     }
 }
 
-data class HistoryRecord(val endedAt: Long, val saved: SavedMatch)
+data class HistoryRecord(val endedAt: Long, val saved: SavedMatch, val manuallyEntered: Boolean = false)
 
 private fun JSONArray?.toLongList(): List<Long> = if (this == null) emptyList() else (0 until length()).map { getLong(it) }
 private fun JSONArray?.toStringList(): List<String> = if (this == null) emptyList() else (0 until length()).map { getString(it) }
+private fun JSONArray?.toGoalEvents(): List<GoalEvent> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it).let { goal -> GoalEvent(goal.optBoolean("teamA"), goal.optLong("elapsed")) } }
 
 private val Ink = Color(0xFF111820)
 private val Panel = Color(0xFF1B2530)
@@ -175,8 +179,8 @@ private fun TanteoApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>,
 
     Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
         when (screen) {
-            "sport" -> SportSelectionScreen { sport -> config = MatchConfig(sport = sport, colorA = 0, colorB = 1); screen = "setup" }
-            "setup" -> SetupScreen(config, { config = it }, { screen = "sport" }, { screen = "teams" }, { screen = "history" }, {
+            "sport" -> SportSelectionScreen { sport -> config = normalizeWatchRoster(MatchConfig(sport = sport, colorA = 0, colorB = 1)); screen = "setup" }
+            "setup" -> SetupScreen(config, { config = it }, { screen = "sport" }, { screen = "history" }, {
                 val started = config.copy(
                     teamA = config.teamA.ifBlank { "Mi Equipo" },
                     teamB = config.teamB.ifBlank { "Rival" },
@@ -191,7 +195,6 @@ private fun TanteoApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>,
                 androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, HealthTrackingService::class.java))
                 screen = "score"
             })
-            "teams" -> TeamsScreen(config, { config = it }, { screen = "setup" })
             "history" -> HistoryScreen(records, config.sport, { index -> selectedRecord = index; screen = "detail" }, { screen = "global" }, { screen = "setup" })
             "global" -> GlobalStatsWatch(records.filter { if (config.sport.isFootball) it.saved.config.sport.isFootball else it.saved.config.sport == config.sport }) { screen = "history" }
             "detail" -> selectedRecord?.let { index ->
@@ -218,7 +221,11 @@ private fun TanteoApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>,
                     val previous = state
                     state = if (config.sport.isFootball) state.copy(
                         pointsA = state.pointsA + if (teamA) 1 else 0,
-                        pointsB = state.pointsB + if (teamA) 0 else 1
+                        pointsB = state.pointsB + if (teamA) 0 else 1,
+                        goalEvents = state.goalEvents + GoalEvent(
+                            teamA,
+                            (System.currentTimeMillis() - state.startedAt).coerceAtLeast(0)
+                        )
                     ) else MatchEngine.point(state, teamA, config)
                     view.performHapticFeedback(if (state.setsA != previous.setsA || state.setsB != previous.setsB) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.CLOCK_TICK)
                     persist(SavedMatch(config, state))
@@ -286,14 +293,14 @@ private fun SportChoiceWatch(label: String, sport: Sport, modifier: Modifier, se
 }
 
 @Composable
-private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, chooseSport: () -> Unit, teams: () -> Unit, history: () -> Unit, start: () -> Unit) {
+private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, chooseSport: () -> Unit, history: () -> Unit, start: () -> Unit) {
     Column(
         Modifier.fillMaxSize().pointerInput(Unit) {
             var drag = 0f
             detectVerticalDragGestures(
                 onDragStart = { drag = 0f },
                 onVerticalDrag = { _, amount -> drag += amount },
-                onDragEnd = { if (drag < -45f) teams() else if (drag > 45f) history() }
+                onDragEnd = { if (drag > 45f) history() }
             )
         }.padding(horizontal = 28.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -301,9 +308,9 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, choo
     ) {
         Text("<  ${config.sport.displayName.uppercase()}", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = chooseSport).padding(2.dp))
         if (config.sport.isFootball) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Choice("F5", config.sport == Sport.FOOTBALL_5, 42) { update(config.copy(sport = Sport.FOOTBALL_5)) }
-            Choice("F7", config.sport == Sport.FOOTBALL_7, 42) { update(config.copy(sport = Sport.FOOTBALL_7)) }
-            Choice("F11", config.sport == Sport.FOOTBALL_11, 42) { update(config.copy(sport = Sport.FOOTBALL_11)) }
+            Choice("F5", config.sport == Sport.FOOTBALL_5, 42) { update(normalizeWatchRoster(config.copy(sport = Sport.FOOTBALL_5))) }
+            Choice("F7", config.sport == Sport.FOOTBALL_7, 42) { update(normalizeWatchRoster(config.copy(sport = Sport.FOOTBALL_7))) }
+            Choice("F11", config.sport == Sport.FOOTBALL_11, 42) { update(normalizeWatchRoster(config.copy(sport = Sport.FOOTBALL_11))) }
         }
         if (!config.sport.isFootball) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Sets", color = Muted, fontSize = 9.sp, maxLines = 1)
@@ -329,14 +336,10 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, choo
         if (!config.sport.isFootball) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Modo", color = Muted, fontSize = 10.sp, modifier = Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Choice("1v1", !config.doubles) { update(config.copy(doubles = false)) }
-                Choice("2v2", config.doubles) { update(config.copy(doubles = true)) }
+                Choice("1v1", !config.doubles) { update(normalizeWatchRoster(config.copy(doubles = false))) }
+                Choice("2v2", config.doubles) { update(normalizeWatchRoster(config.copy(doubles = true))) }
             }
         }
-        if (config.sport.isFootball) Box(
-            Modifier.fillMaxWidth(.72f).height(25.dp).clip(RoundedCornerShape(6.dp)).background(Panel).clickable(onClick = teams),
-            contentAlignment = Alignment.Center
-        ) { Text("EQUIPOS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
         Box(
             Modifier.fillMaxWidth(.82f).height(29.dp).clip(RoundedCornerShape(7.dp)).background(Lime).clickable(onClick = start),
             contentAlignment = Alignment.Center
@@ -347,7 +350,7 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, choo
 @Composable
 private fun TeamsScreen(config: MatchConfig, update: (MatchConfig) -> Unit, back: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().pointerInput(Unit) {
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).pointerInput(Unit) {
             var drag = 0f
             detectVerticalDragGestures(
                 onDragStart = { drag = 0f },
@@ -358,18 +361,47 @@ private fun TeamsScreen(config: MatchConfig, update: (MatchConfig) -> Unit, back
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text("EQUIPOS", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        Text("INTEGRANTES", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.clickable(onClick = back).padding(3.dp))
         Spacer(Modifier.height(5.dp))
-        NameField(config.teamA, TeamColors[0]) { update(config.copy(teamA = it, colorA = 0)) }
-        Spacer(Modifier.height(7.dp))
-        NameField(config.teamB, TeamColors[1]) { update(config.copy(teamB = it, colorB = 1)) }
+        Text("MI EQUIPO", color = TeamColors[0], fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        config.teamAPlayers.forEachIndexed { index, name ->
+            Text(if (index == 0) "VOS" else "COMPAÑERO ${index + 1}", color = Muted, fontSize = 7.sp)
+            NameField(name, TeamColors[0]) { value ->
+                val list = config.teamAPlayers.toMutableList().apply { this[index] = value }
+                update(config.copy(userPlayer = if (index == 0) value.ifBlank { "Yo" } else config.userPlayer, teamAPlayers = list))
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text("RIVALES", color = TeamColors[1], fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        config.teamBPlayers.forEachIndexed { index, name ->
+            Text("RIVAL ${index + 1}", color = Muted, fontSize = 7.sp)
+            NameField(name, TeamColors[1]) { value ->
+                update(config.copy(teamBPlayers = config.teamBPlayers.toMutableList().apply { this[index] = value }))
+            }
+        }
         Spacer(Modifier.height(7.dp))
         Box(
             Modifier.fillMaxWidth(.72f).height(22.dp).clip(RoundedCornerShape(6.dp)).background(Lime).clickable(onClick = back),
             contentAlignment = Alignment.Center
         ) { Text("LISTO", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
     }
+}
+
+private fun normalizeWatchRoster(config: MatchConfig): MatchConfig {
+    val size = if (config.sport.isFootball) config.sport.teamSize else if (config.doubles) 2 else 1
+    val user = config.userPlayer.ifBlank { "Yo" }
+    val own = MutableList(size) { config.teamAPlayers.getOrNull(it).orEmpty() }
+    val rivals = MutableList(size) { config.teamBPlayers.getOrNull(it).orEmpty() }
+    own[0] = user
+    return config.copy(teamA = "Mi Equipo", teamB = "Rival", userPlayer = user, teamAPlayers = own, teamBPlayers = rivals)
+}
+
+private fun watchMatchupLabel(config: MatchConfig): String {
+    if (config.sport.isFootball) return "Mi Equipo vs Rival"
+    val own = config.teamAPlayers.filter { it.isNotBlank() }.ifEmpty { listOf(config.userPlayer.ifBlank { "Yo" }) }
+    val rivals = config.teamBPlayers.filter { it.isNotBlank() }.ifEmpty { listOf("Rival") }
+    return "${own.joinToString(" ")} vs ${rivals.joinToString(" ")}"
 }
 
 @Composable
@@ -398,8 +430,7 @@ private fun HistoryScreen(records: List<HistoryRecord>, sport: Sport, open: (Int
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text("$scoreA-$scoreB", color = outcome, fontSize = 15.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(outcome.copy(alpha = .14f)).padding(horizontal = 7.dp, vertical = 1.dp))
-                        Text(saved.config.teamA, color = TeamColors[saved.config.colorA], fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                        Text(saved.config.teamB, color = TeamColors[saved.config.colorB], fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(watchMatchupLabel(saved.config), color = Color.White, fontSize = 7.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center)
                         Text(formatLocalDate(record.endedAt, "dd/MM/yy"), color = Color.White, fontSize = 8.sp, lineHeight = 10.sp)
                     }
                 }
@@ -453,10 +484,10 @@ private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Un
     ) {
         Text("<  DETALLE", color = Color.White, fontSize = 11.sp, modifier = Modifier.clickable(onClick = onBack))
         Text(formatLocalDate(record.endedAt, "dd/MM/yyyy  HH:mm"), color = Muted, fontSize = 9.sp)
-        NameField(saved.config.teamA, TeamColors[saved.config.colorA]) { onUpdate(record.copy(saved = saved.copy(config = saved.config.copy(teamA = it)))) }
-        NameField(saved.config.teamB, TeamColors[saved.config.colorB]) { onUpdate(record.copy(saved = saved.copy(config = saved.config.copy(teamB = it)))) }
+        Text(watchMatchupLabel(saved.config), color = Color.White, fontSize = 9.sp, textAlign = TextAlign.Center)
         Text("RESULTADO  ${if (saved.config.sport.isFootball) "${saved.state.pointsA}-${saved.state.pointsB}" else "${saved.state.setsA}-${saved.state.setsB}"}", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Text("TOTAL  ${formatDuration(total)}", color = Color.White, fontSize = 11.sp)
+        if (saved.config.sport.isFootball && saved.state.goalEvents.isNotEmpty()) GoalTimelineWatch(saved.state.goalEvents)
         if (!saved.config.sport.isFootball) Row(Modifier.fillMaxWidth().padding(horizontal = 5.dp)) {
             Text("SET", color = Muted, fontSize = 7.sp, modifier = Modifier.weight(1f))
             Text("RESULTADO", color = Muted, fontSize = 7.sp, textAlign = TextAlign.Center, modifier = Modifier.weight(1.4f))
@@ -477,6 +508,25 @@ private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Un
             }, contentAlignment = Alignment.Center
         ) {
             Text(if (confirmDelete) "CONFIRMAR" else "ELIMINAR", color = Color(0xFFFF777D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun GoalTimelineWatch(events: List<GoalEvent>) {
+    var scoreA = 0
+    var scoreB = 0
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).padding(7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text("GOLES", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        events.forEach { goal ->
+            if (goal.teamA) scoreA++ else scoreB++
+            Row(Modifier.fillMaxWidth()) {
+                Text(if (goal.teamA) "MI" else "RIVAL", color = if (goal.teamA) TeamColors[0] else TeamColors[1], fontSize = 7.sp, modifier = Modifier.weight(1f))
+                Text("$scoreA-$scoreB", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(10.dp))
+                val seconds = goal.elapsedMillis.coerceAtLeast(0) / 1000
+                Text("${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}", color = Lime, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -546,8 +596,8 @@ private fun ScoreScreen(config: MatchConfig, state: MatchState, onPoint: (Boolea
         }
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            TeamPanel(config.teamA, TeamColors[config.colorA], state.gamesA, state.setsA, MatchEngine.pointLabel(state.pointsA, state.pointsB, state.tieBreak, config.advantage), serverA, MatchEngine.serverPlayer(state), config.doubles, state.finished && state.setsA > state.setsB, !state.finished && !locked, { onPoint(true) }, Modifier.weight(1f))
-            TeamPanel(config.teamB, TeamColors[config.colorB], state.gamesB, state.setsB, MatchEngine.pointLabel(state.pointsB, state.pointsA, state.tieBreak, config.advantage), !serverA, MatchEngine.serverPlayer(state), config.doubles, state.finished && state.setsB > state.setsA, !state.finished && !locked, { onPoint(false) }, Modifier.weight(1f))
+            TeamPanel("Mi Equipo", TeamColors[config.colorA], state.gamesA, state.setsA, MatchEngine.pointLabel(state.pointsA, state.pointsB, state.tieBreak, config.advantage), serverA, MatchEngine.serverPlayer(state), config.doubles, state.finished && state.setsA > state.setsB, !state.finished && !locked, { onPoint(true) }, Modifier.weight(1f))
+            TeamPanel("Rival", TeamColors[config.colorB], state.gamesB, state.setsB, MatchEngine.pointLabel(state.pointsB, state.pointsA, state.tieBreak, config.advantage), !serverA, MatchEngine.serverPlayer(state), config.doubles, state.finished && state.setsB > state.setsA, !state.finished && !locked, { onPoint(false) }, Modifier.weight(1f))
         }
     }
 }
@@ -564,8 +614,8 @@ private fun FootballScoreWatch(config: MatchConfig, state: MatchState, onGoal: (
         }
         Spacer(Modifier.height(7.dp))
         Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            FootballTeamWatch(config.teamA, TeamColors[config.colorA], state.pointsA, !locked, { onGoal(true) }, Modifier.weight(1f))
-            FootballTeamWatch(config.teamB, TeamColors[config.colorB], state.pointsB, !locked, { onGoal(false) }, Modifier.weight(1f))
+            FootballTeamWatch("Mi Equipo", TeamColors[config.colorA], state.pointsA, !locked, { onGoal(true) }, Modifier.weight(1f))
+            FootballTeamWatch("Rival", TeamColors[config.colorB], state.pointsB, !locked, { onGoal(false) }, Modifier.weight(1f))
         }
     }
 }
