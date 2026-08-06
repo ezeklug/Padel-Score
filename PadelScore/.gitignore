@@ -1,0 +1,35 @@
+# Android Studio and IntelliJ
+.idea/
+*.iml
+
+# Local Android SDK path
+local.properties
+
+# Gradle and Kotlin caches
+.gradle/
+.kotlin/
+**/build/
+
+# Native build output
+.externalNativeBuild/
+.cxx/
+
+# Signing keys and credentials
+*.jks
+*.keystore
+keystore.properties
+
+# Generated packages and captures
+*.apk
+*.aab
+captures/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Local design/reference screenshot (not used by the app)
+/image.png
+
+# Keep the Gradle Wrapper in version control
+!gradle/wrapper/gradle-wrapper.jar
