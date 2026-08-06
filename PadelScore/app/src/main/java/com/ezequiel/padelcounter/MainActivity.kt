@@ -6,8 +6,9 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -20,6 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -34,6 +38,8 @@ import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("match", MODE_PRIVATE) }
@@ -131,6 +137,7 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
             "detail" -> selectedRecord?.let { index ->
                 HistoryDetail(records[index],
                     onUpdate = { updated -> records[index] = updated; persistHistory(records.toList()) },
+                    onDelete = { records.removeAt(index); persistHistory(records.toList()); selectedRecord = null; screen = "history" },
                     onBack = { screen = "history" })
             }
             "confirm" -> ConfirmScreen(
@@ -139,8 +146,11 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
                     if (state.finished) {
                         records.add(0, HistoryRecord(System.currentTimeMillis(), SavedMatch(config, state)))
                         persistHistory(records.toList())
+                        selectedRecord = 0
                     }
-                    persist(null); config = MatchConfig(); state = MatchState(); history.clear(); locked = false; screen = "setup"
+                    val wasFinished = state.finished
+                    persist(null); config = MatchConfig(); state = MatchState(); history.clear(); locked = false
+                    screen = if (wasFinished) "detail" else "setup"
                 }
             )
             else -> ScoreScreen(config, state,
@@ -163,9 +173,9 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, team
     Column(
         Modifier.fillMaxSize().pointerInput(Unit) {
             var drag = 0f
-            detectHorizontalDragGestures(
+            detectVerticalDragGestures(
                 onDragStart = { drag = 0f },
-                onHorizontalDrag = { _, amount -> drag += amount },
+                onVerticalDrag = { _, amount -> drag += amount },
                 onDragEnd = { if (drag < -45f) teams() else if (drag > 45f) history() }
             )
         }.padding(horizontal = 28.dp, vertical = 8.dp),
@@ -212,9 +222,9 @@ private fun TeamsScreen(config: MatchConfig, update: (MatchConfig) -> Unit, back
     Column(
         Modifier.fillMaxSize().pointerInput(Unit) {
             var drag = 0f
-            detectHorizontalDragGestures(
+            detectVerticalDragGestures(
                 onDragStart = { drag = 0f },
-                onHorizontalDrag = { _, amount -> drag += amount },
+                onVerticalDrag = { _, amount -> drag += amount },
                 onDragEnd = { if (drag > 45f) back() }
             )
         }.padding(horizontal = 27.dp, vertical = 9.dp),
@@ -249,38 +259,47 @@ private fun ColorPicker(selected: Int, update: (Int) -> Unit) {
 @Composable
 private fun HistoryScreen(records: List<HistoryRecord>, open: (Int) -> Unit, back: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().pointerInput(Unit) {
-            var drag = 0f
-            detectHorizontalDragGestures(onDragStart = { drag = 0f }, onHorizontalDrag = { _, amount -> drag += amount }, onDragEnd = { if (drag < -45f) back() })
-        }.verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 12.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Text("HISTORIAL", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("<  HISTORIAL", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.clickable(onClick = back).padding(horizontal = 8.dp, vertical = 4.dp))
         if (records.isEmpty()) Text("Sin partidos", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 35.dp))
-        records.forEachIndexed { index, record ->
-            val saved = record.saved
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(Color(0xFF292E2A)).clickable { open(index) }.padding(7.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("${saved.config.teamA}  ${saved.state.setsA}-${saved.state.setsB}  ${saved.config.teamB}", color = Color.White, fontSize = 10.sp, maxLines = 1)
-                Text(SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(Date(record.endedAt)), color = Muted, fontSize = 8.sp)
+        records.chunked(2).forEachIndexed { rowIndex, rowRecords ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                rowRecords.forEachIndexed { columnIndex, record ->
+                    val saved = record.saved
+                    Column(
+                        Modifier.weight(1f).height(72.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF292E2A))
+                            .clickable { open(rowIndex * 2 + columnIndex) }.padding(5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("${saved.state.setsA}-${saved.state.setsB}", color = Lime, fontSize = 15.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold)
+                        Text(saved.config.teamA, color = TeamColors[saved.config.colorA], fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(saved.config.teamB, color = TeamColors[saved.config.colorB], fontSize = 8.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(formatLocalDate(record.endedAt, "dd/MM/yy"), color = Color.White, fontSize = 8.sp, lineHeight = 10.sp)
+                    }
+                }
+                if (rowRecords.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Unit, onBack: () -> Unit) {
+private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Unit, onDelete: () -> Unit, onBack: () -> Unit) {
     val saved = record.saved
-    val total = (record.endedAt - saved.state.startedAt).coerceAtLeast(0)
+    val total = saved.state.setDurations.sum().takeIf { it > 0 } ?: (record.endedAt - saved.state.startedAt).coerceAtLeast(0)
+    var confirmDelete by remember(record.endedAt) { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 26.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Text("<  DETALLE", color = Color.White, fontSize = 11.sp, modifier = Modifier.clickable(onClick = onBack))
+        Text(formatLocalDate(record.endedAt, "dd/MM/yyyy  HH:mm"), color = Muted, fontSize = 9.sp)
         NameField(saved.config.teamA, TeamColors[saved.config.colorA]) { onUpdate(record.copy(saved = saved.copy(config = saved.config.copy(teamA = it)))) }
         NameField(saved.config.teamB, TeamColors[saved.config.colorB]) { onUpdate(record.copy(saved = saved.copy(config = saved.config.copy(teamB = it)))) }
         Text("RESULTADO  ${saved.state.setsA}-${saved.state.setsB}", color = Lime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -288,6 +307,13 @@ private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Un
         saved.state.setDurations.forEachIndexed { index, duration -> Text("Set ${index + 1}  ${formatDuration(duration)}", color = Muted, fontSize = 10.sp) }
         val games = saved.state.gameDurations
         if (games.isNotEmpty()) Text("${games.size} games · Prom. ${formatDuration(games.average().toLong())}", color = Muted, fontSize = 9.sp)
+        Box(
+            Modifier.fillMaxWidth(.72f).height(23.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF512326)).clickable {
+                if (confirmDelete) onDelete() else confirmDelete = true
+            }, contentAlignment = Alignment.Center
+        ) {
+            Text(if (confirmDelete) "CONFIRMAR" else "ELIMINAR", color = Color(0xFFFF777D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -296,6 +322,11 @@ private fun formatDuration(ms: Long): String {
     val minutes = seconds / 60
     return "%d:%02d".format(minutes, seconds % 60)
 }
+
+private fun formatLocalDate(timestamp: Long, pattern: String): String =
+    SimpleDateFormat(pattern, Locale.getDefault()).apply {
+        timeZone = TimeZone.getTimeZone("America/Argentina/Buenos_Aires")
+    }.format(Date(timestamp))
 
 @Composable
 private fun NameField(value: String, color: Color, update: (String) -> Unit) {
@@ -318,14 +349,20 @@ private fun Choice(label: String, selected: Boolean, click: () -> Unit) {
 @Composable
 private fun ScoreScreen(config: MatchConfig, state: MatchState, onPoint: (Boolean) -> Unit, onUndo: () -> Unit, onFinish: () -> Unit, locked: Boolean, onLockChange: (Boolean) -> Unit) {
     val serverA = MatchEngine.serverTeamA(state, config)
+    var now by remember(state.startedAt) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.startedAt, state.finished) {
+        while (!state.finished) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val elapsed = if (state.finished && state.setDurations.isNotEmpty()) state.setDurations.sum() else (now - state.startedAt).coerceAtLeast(0)
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             TinyButton("↶", onUndo, !locked)
-            Text(
-                if (locked) "BLOQUEADO" else if (state.finished) "FINAL" else if (state.tieBreak) "TIE-BREAK" else "PARTIDO",
-                color = if (state.finished) Lime else Muted, fontSize = 11.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
+            Spacer(Modifier.weight(1f))
+            Text(formatDuration(elapsed), color = if (locked) Lime else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(5.dp))
             LockButton(locked, onLockChange)
             Spacer(Modifier.width(4.dp))
             TinyButton("×", onFinish, !locked)
@@ -374,7 +411,12 @@ private fun LockButton(locked: Boolean, update: (Boolean) -> Unit) {
         detectTapGestures(onLongPress = { update(false) })
     } else Modifier.clickable { update(true) }
     Box(Modifier.size(23.dp).clip(CircleShape).background(if (locked) Lime else Color(0xFF292E2A)).then(modifier), contentAlignment = Alignment.Center) {
-        Text(if (locked) "!" else "L", color = if (locked) Ink else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Canvas(Modifier.size(12.dp)) {
+            val iconColor = if (locked) Ink else Color.White
+            drawRoundRect(iconColor, topLeft = Offset(2f, 5f), size = Size(size.width - 4f, size.height - 6f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5f, 1.5f))
+            drawArc(iconColor, startAngle = 180f, sweepAngle = 180f, useCenter = false,
+                topLeft = Offset(3.5f, 1f), size = Size(size.width - 7f, 8f), style = Stroke(width = 1.8f))
+        }
     }
 }
 
