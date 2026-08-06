@@ -80,11 +80,14 @@ class MobileDataListenerService : WearableListenerService() {
             val map = DataMapItem.fromDataItem(event.dataItem).dataMap
             val prefs = getSharedPreferences("match", MODE_PRIVATE)
             val remoteUpdated = map.getLong("updatedAt")
-            if (remoteUpdated <= prefs.getLong("sync_updated", 0L)) return@forEach
+            val sourceNode = event.dataItem.uri.host.orEmpty().ifBlank { "remote" }
+            val receivedKey = "sync_received_$sourceNode"
+            if (remoteUpdated <= prefs.getLong(receivedKey, 0L)) return@forEach
             val remoteCurrent = map.getString("current") ?: ""
             val remoteHistory = map.getString("history") ?: "[]"
             val previousCurrent = prefs.getString("current", null)
             val previousHistory = prefs.getString("history", "[]") ?: "[]"
+            val dataChanged = remoteCurrent != previousCurrent.orEmpty() || remoteHistory != previousHistory
             val matchJustStarted = previousCurrent.isNullOrBlank() && remoteCurrent.isNotBlank()
             val matchJustEnded = !previousCurrent.isNullOrBlank() && remoteCurrent.isBlank()
             val newFinishedRecord = latestEndedAt(remoteHistory) != null && latestEndedAt(remoteHistory) != latestEndedAt(previousHistory)
@@ -92,9 +95,9 @@ class MobileDataListenerService : WearableListenerService() {
                 if (remoteCurrent.isBlank()) remove("current") else putString("current", remoteCurrent)
                 putString("history", remoteHistory)
                 if (matchJustEnded || newFinishedRecord) putBoolean("open_latest_detail", true)
-                putLong("sync_updated", remoteUpdated)
+                putLong(receivedKey, remoteUpdated)
             }.apply()
-            if (remoteCurrent.isNotBlank() || matchJustStarted || matchJustEnded || newFinishedRecord) {
+            if (dataChanged) {
                 sendBroadcast(Intent(ACTION_SYNCED).setPackage(packageName))
             }
         }

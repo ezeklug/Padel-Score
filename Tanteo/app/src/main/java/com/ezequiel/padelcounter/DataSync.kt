@@ -35,10 +35,13 @@ class PadelDataListenerService : WearableListenerService() {
             val map = DataMapItem.fromDataItem(event.dataItem).dataMap
             val prefs = getSharedPreferences("match", MODE_PRIVATE)
             val remoteUpdated = map.getLong("updatedAt")
-            if (remoteUpdated <= prefs.getLong("sync_updated", 0L)) return@forEach
+            val sourceNode = event.dataItem.uri.host.orEmpty().ifBlank { "remote" }
+            val receivedKey = "sync_received_$sourceNode"
+            if (remoteUpdated <= prefs.getLong(receivedKey, 0L)) return@forEach
             val remoteCurrent = map.getString("current") ?: ""
             var remoteHistory = map.getString("history") ?: "[]"
             val previousHistory = prefs.getString("history", "[]") ?: "[]"
+            val previousCurrent = prefs.getString("current", null)
             val hadCurrent = !prefs.getString("current", null).isNullOrBlank()
             val matchJustStarted = !hadCurrent && remoteCurrent.isNotBlank()
             val matchJustEnded = hadCurrent && remoteCurrent.isBlank()
@@ -47,11 +50,12 @@ class PadelDataListenerService : WearableListenerService() {
                 val metrics = HealthMetricsStore.apply(this, MatchState())
                 remoteHistory = runCatching { JSONArray(remoteHistory).also { array -> if (array.length() > 0) array.getJSONObject(0).apply { put("hrAvg", metrics.averageHeartRate); put("hrMax", metrics.maxHeartRate); put("distance", metrics.distanceMeters); put("calories", metrics.calories); put("steps", metrics.steps); put("distanceEstimated", metrics.distanceEstimated) } }.toString() }.getOrDefault(remoteHistory)
             }
+            val dataChanged = remoteCurrent != previousCurrent.orEmpty() || remoteHistory != previousHistory
             prefs.edit().apply {
                 if (remoteCurrent.isBlank()) remove("current") else putString("current", remoteCurrent)
                 putString("history", remoteHistory)
                 if (matchJustEnded || newFinishedRecord) putBoolean("open_latest_detail", true)
-                putLong("sync_updated", remoteUpdated)
+                putLong(receivedKey, remoteUpdated)
             }.apply()
             if (matchJustStarted) {
                 HealthMetricsStore.reset(this)
@@ -59,7 +63,7 @@ class PadelDataListenerService : WearableListenerService() {
             }
             if (matchJustEnded) startService(Intent(this, HealthTrackingService::class.java).setAction("STOP"))
             if (matchJustEnded) DataSync.publish(this)
-            if (remoteCurrent.isNotBlank() || matchJustStarted || matchJustEnded || newFinishedRecord) {
+            if (dataChanged) {
                 sendBroadcast(Intent(ACTION_SYNCED).setPackage(packageName))
             }
         }

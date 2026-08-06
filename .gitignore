@@ -17,11 +17,17 @@ local.properties
 # Signing keys and credentials
 *.jks
 *.keystore
+*.p12
+*.pem
 keystore.properties
+key.properties
+.env
+.env.*
 
-# Generated packages and captures
+# Generated packages, logs, and captures
 *.apk
 *.aab
+*.log
 captures/
 
 # Operating system files
@@ -29,7 +35,7 @@ captures/
 Thumbs.db
 
 # Local design/reference screenshot (not used by the app)
-/image.png
+Tanteo/image.png
 
 # Keep the Gradle Wrapper in version control
-!gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.jar

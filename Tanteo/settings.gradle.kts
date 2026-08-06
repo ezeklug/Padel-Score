@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PadelScore"
+rootProject.name = "Tanteo"
 include(":app")
 include(":shared")
 include(":mobile")

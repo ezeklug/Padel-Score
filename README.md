@@ -33,9 +33,9 @@ Aplicacion Android multideporte para registrar partidos desde un telefono y un r
 
 ## Modulos
 
-- `PadelScore/app`: aplicacion Wear OS.
-- `PadelScore/mobile`: aplicacion para telefonos Android.
-- `PadelScore/shared`: modelos y reglas usados por ambas apps.
+- `Tanteo/app`: aplicacion Wear OS.
+- `Tanteo/mobile`: aplicacion para telefonos Android.
+- `Tanteo/shared`: modelos y reglas usados por ambas apps.
 
 ## Requisitos
 
@@ -48,7 +48,7 @@ Al abrir la app del reloj se solicitan permisos de actividad y ritmo cardiaco. S
 
 ## Ejecutar
 
-Abrir la carpeta `PadelScore` en Android Studio y esperar la sincronizacion de Gradle.
+Abrir la carpeta `Tanteo` en Android Studio y esperar la sincronizacion de Gradle.
 
 Para el reloj, seleccionar la configuracion `app`, elegir el reloj y pulsar **Run**. Para el telefono, seleccionar `mobile`, elegir el telefono y pulsar **Run**.
 
@@ -60,10 +60,54 @@ La sincronizacion utiliza Wear OS Data Layer y no requiere servidor. Ambas aplic
 
 ## Compilar
 
-Desde `PadelScore`:
+Desde `Tanteo`:
 
 ```powershell
 .\gradlew.bat :app:testDebugUnitTest :mobile:assembleDebug :app:assembleDebug
 ```
 
 Los archivos locales, caches, APK y claves de firma se excluyen mediante `.gitignore`.
+
+## Compartir e instalar sin Google Play
+
+Se pueden distribuir las dos aplicaciones como archivos APK. La persona que las reciba debe instalar una APK en el telefono y otra en el reloj. Para que la sincronizacion funcione, ambas deben generarse con el mismo `applicationId`, la misma version y la misma clave de firma.
+
+### Generar APK de prueba
+
+Desde la carpeta `Tanteo`:
+
+```powershell
+.\gradlew.bat :mobile:assembleDebug :app:assembleDebug
+```
+
+Se generan estos archivos:
+
+- Telefono: `mobile/build/outputs/apk/debug/mobile-debug.apk`
+- Reloj: `app/build/outputs/apk/debug/app-debug.apk`
+
+Estas APK sirven para pruebas directas. Para compartir versiones estables conviene generar APK firmadas desde Android Studio mediante **Build > Generate Signed App Bundle or APK > APK**. Hay que seleccionar primero `mobile` y despues `app`, utilizando exactamente el mismo archivo de claves y el mismo alias en ambas. La clave debe guardarse en un lugar seguro y no subirse a GitHub; sin ella no se podran publicar actualizaciones compatibles.
+
+### Instalar en el telefono
+
+1. Enviar `mobile-debug.apk` o la APK firmada del modulo `mobile` al telefono.
+2. Abrir el archivo desde el telefono.
+3. Cuando Android lo solicite, permitir **Instalar aplicaciones desconocidas** para la aplicacion desde la que se abrio el APK.
+4. Confirmar la instalacion.
+
+### Instalar en el reloj por Wi-Fi
+
+El APK del reloj no se abre desde el telefono. Se instala mediante ADB inalambrico:
+
+1. En el reloj, activar **Opciones de desarrollador**, **Depuracion ADB** y **Depuracion inalambrica**.
+2. Abrir **Depuracion inalambrica > Vincular dispositivo nuevo** para consultar la IP, los puertos y el codigo.
+3. En una PC con Android SDK Platform Tools, ejecutar:
+
+```powershell
+adb pair IP:PUERTO_DE_VINCULACION
+adb connect IP:PUERTO_DE_DEPURACION
+adb install -r app-debug.apk
+```
+
+Al ejecutar `adb pair`, ingresar el codigo mostrado por el reloj. Para una APK firmada, reemplazar `app-debug.apk` por el nombre correspondiente.
+
+El telefono debe estar emparejado normalmente con ese reloj. Además, la APK del telefono y la del reloj deben provenir de la misma compilacion y estar firmadas con la misma clave para utilizar Wear OS Data Layer.
