@@ -23,6 +23,7 @@ object PhoneCodec {
         put("sa", s.setsA); put("sb", s.setsB); put("done", s.finished); put("completedGames", s.completedGames)
         put("startedAt", s.startedAt); put("setStartedAt", s.setStartedAt); put("gameStartedAt", s.gameStartedAt)
         put("setDurations", JSONArray(s.setDurations)); put("gameDurations", JSONArray(s.gameDurations)); put("setScores", JSONArray(s.setScores))
+        put("hrAvg", s.averageHeartRate); put("hrMax", s.maxHeartRate); put("distance", s.distanceMeters); put("calories", s.calories); put("steps", s.steps); put("distanceEstimated", s.distanceEstimated)
     }
 
     fun matchFromJson(json: JSONObject) = PhoneMatch(
@@ -32,7 +33,9 @@ object PhoneCodec {
             setsA = json.getInt("sa"), setsB = json.getInt("sb"), finished = json.getBoolean("done"), completedGames = json.optInt("completedGames", 0),
             startedAt = json.optLong("startedAt", System.currentTimeMillis()), setStartedAt = json.optLong("setStartedAt", System.currentTimeMillis()),
             gameStartedAt = json.optLong("gameStartedAt", System.currentTimeMillis()), setDurations = json.optJSONArray("setDurations").longs(),
-            gameDurations = json.optJSONArray("gameDurations").longs(), setScores = json.optJSONArray("setScores").strings()
+            gameDurations = json.optJSONArray("gameDurations").longs(), setScores = json.optJSONArray("setScores").strings(),
+            averageHeartRate = json.optDouble("hrAvg", 0.0), maxHeartRate = json.optDouble("hrMax", 0.0),
+            distanceMeters = json.optDouble("distance", 0.0), calories = json.optDouble("calories", 0.0), steps = json.optLong("steps", 0), distanceEstimated = json.optBoolean("distanceEstimated", false)
         )
     )
 

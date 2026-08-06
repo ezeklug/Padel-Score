@@ -35,6 +35,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.wear.compose:compose-material3:1.6.2")
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
+    implementation("androidx.health:health-services-client:1.1.0-rc02")
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("com.google.guava:guava:33.5.0-android")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

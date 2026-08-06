@@ -172,17 +172,21 @@ private fun navColors() = NavigationBarItemDefaults.colors(
 
 @Composable
 private fun SetupPhone(config: MatchConfig, update: (MatchConfig) -> Unit, start: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Column { Text("NUEVO PARTIDO", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold); Text("Configura los equipos", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) } }
-        item { OutlinedTextField(config.teamA, { update(config.copy(teamA = formatTeamNameInput(it))) }, label = { Text("Mi equipo") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
-        item { ColorRow(config.colorA, config.colorB) { update(config.copy(colorA = it)) } }
-        item { OutlinedTextField(config.teamB, { update(config.copy(teamB = formatTeamNameInput(it))) }, label = { Text("Rival") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
-        item { ColorRow(config.colorB, config.colorA) { update(config.copy(colorB = it)) } }
-        item { OptionRow("Sets", listOf("1", "3", "5", "Libre"), listOf(1, 3, 5, 0).indexOf(config.maxSets)) { update(config.copy(maxSets = listOf(1, 3, 5, 0)[it])) } }
-        item { OptionRow("Ventaja", listOf("Si", "No"), if (config.advantage) 0 else 1) { update(config.copy(advantage = it == 0)) } }
-        item { OptionRow("Modalidad", listOf("1 vs 1", "2 vs 2"), if (config.doubles) 1 else 0) { update(config.copy(doubles = it == 1)) } }
-        item { OptionRow("Primer saque", listOf(config.teamA, config.teamB), if (config.initialServerA) 0 else 1) { update(config.copy(initialServerA = it == 0)) } }
-        item { Button(start, Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(8.dp)) { Icon(Icons.Default.Scoreboard, null); Spacer(Modifier.width(8.dp)); Text("Empezar partido", fontWeight = FontWeight.Bold) } }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 92.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item { Column { Text("NUEVO PARTIDO", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold); Text("Configura los equipos", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) } }
+            item { OutlinedTextField(config.teamA, { update(config.copy(teamA = formatTeamNameInput(it))) }, label = { Text("Mi equipo") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
+            item { ColorRow(config.colorA, config.colorB) { update(config.copy(colorA = it)) } }
+            item { OutlinedTextField(config.teamB, { update(config.copy(teamB = formatTeamNameInput(it))) }, label = { Text("Rival") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
+            item { ColorRow(config.colorB, config.colorA) { update(config.copy(colorB = it)) } }
+            item { OptionRow("Sets", listOf("1", "3", "5", "Libre"), listOf(1, 3, 5, 0).indexOf(config.maxSets)) { update(config.copy(maxSets = listOf(1, 3, 5, 0)[it])) } }
+            item { OptionRow("Primer saque", listOf(config.teamA, config.teamB), if (config.initialServerA) 0 else 1) { update(config.copy(initialServerA = it == 0)) } }
+            item { OptionRow("Ventaja", listOf("Si", "No"), if (config.advantage) 0 else 1) { update(config.copy(advantage = it == 0)) } }
+            item { OptionRow("Modalidad", listOf("1 vs 1", "2 vs 2"), if (config.doubles) 1 else 0) { update(config.copy(doubles = it == 1)) } }
+        }
+        Surface(Modifier.fillMaxWidth().align(Alignment.BottomCenter), color = Canvas, shadowElevation = 8.dp) {
+            Button(start, Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp).height(52.dp), shape = RoundedCornerShape(8.dp)) { Icon(Icons.Default.Scoreboard, null); Spacer(Modifier.width(8.dp)); Text("Empezar partido", fontWeight = FontWeight.Bold) }
+        }
     }
 }
 
@@ -295,11 +299,15 @@ private fun GlobalStatsPhone(records: List<PhoneRecord>, back: () -> Unit) {
     val wins = records.count { it.match.state.setsA > it.match.state.setsB }; val losses = records.count { it.match.state.setsA < it.match.state.setsB }; val draws = records.size - wins - losses
     val setsWon = records.sumOf { it.match.state.setsA }; val setsLost = records.sumOf { it.match.state.setsB }
     val games = records.sumOf { it.match.state.completedGames }; val total = records.sumOf { (it.endedAt - it.match.state.startedAt).coerceAtLeast(0) }
+    val healthRecords = records.map { it.match.state }.filter { it.averageHeartRate > 0 || it.distanceMeters > 0 || it.calories > 0 }
+    val avgHeart = healthRecords.map { it.averageHeartRate }.filter { it > 0 }.average().takeIf { !it.isNaN() } ?: 0.0
+    val maxHeart = healthRecords.maxOfOrNull { it.maxHeartRate } ?: 0.0; val distance = healthRecords.sumOf { it.distanceMeters }; val calories = healthRecords.sumOf { it.calories }; val steps = healthRecords.sumOf { it.steps }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { TextButton(back) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Historial") } }
         item { Text("Estadisticas globales", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) { GlobalResult("Ganados", wins, Win, Modifier.weight(1f)); GlobalResult("Empates", draws, Draw, Modifier.weight(1f)); GlobalResult("Perdidos", losses, Loss, Modifier.weight(1f)) } }
         item { Surface(Modifier.fillMaxWidth(), color = Panel, shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Divider)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { GlobalLine("Partidos jugados", records.size.toString()); GlobalLine("Sets", "$setsWon - $setsLost"); GlobalLine("Games completados", games.toString()); GlobalLine("Tiempo en cancha", formatDuration(total)); GlobalLine("Promedio por partido", formatDuration(if (records.isEmpty()) 0 else total / records.size)) } } }
+        if (healthRecords.isNotEmpty()) item { Surface(Modifier.fillMaxWidth(), color = Panel, shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Divider)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { Text("Actividad acumulada", color = Ink, fontWeight = FontWeight.Bold); GlobalLine("Ritmo promedio", "${avgHeart.toInt()} ppm"); GlobalLine("Ritmo maximo", "${maxHeart.toInt()} ppm"); GlobalLine("Distancia", "%.2f km".format(distance / 1000)); GlobalLine("Pasos", steps.toString()); GlobalLine("Calorias", "${calories.toInt()} kcal") } } }
     }
 }
 
@@ -316,9 +324,23 @@ private fun DetailPhone(record: PhoneRecord, update: (PhoneRecord) -> Unit, dele
         item { OutlinedTextField(m.config.teamB, { update(record.copy(match = m.copy(config = m.config.copy(teamB = formatTeamNameInput(it))))) }, label = { Text("Equipo B") }, singleLine = true, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) }
         item { Text("${m.state.setsA} - ${m.state.setsB}", color = Accent, fontSize = 40.sp, fontWeight = FontWeight.Black) }
         item { MatchStatsTable(record) }
+        if (m.state.averageHeartRate > 0 || m.state.distanceMeters > 0 || m.state.calories > 0) item { HealthStatsPhone(m.state) }
         item { OutlinedButton({ if (confirm) delete() else confirm = true }, shape = RoundedCornerShape(7.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF777D))) { Icon(Icons.Default.Delete, null); Spacer(Modifier.width(7.dp)); Text(if (confirm) "Confirmar eliminacion" else "Eliminar partido") } }
     }
 }
+
+@Composable
+private fun HealthStatsPhone(state: MatchState) {
+    Surface(Modifier.fillMaxWidth(), color = Panel, shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Divider)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Actividad", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth()) { HealthMetric("Ritmo promedio", if (state.averageHeartRate > 0) "${state.averageHeartRate.toInt()} ppm" else "—", Modifier.weight(1f)); HealthMetric("Ritmo maximo", if (state.maxHeartRate > 0) "${state.maxHeartRate.toInt()} ppm" else "—", Modifier.weight(1f)) }
+            Row(Modifier.fillMaxWidth()) { HealthMetric(if (state.distanceEstimated) "Distancia estimada" else "Distancia", if (state.distanceMeters > 0) "%.2f km".format(state.distanceMeters / 1000) else "—", Modifier.weight(1f)); HealthMetric("Pasos", if (state.steps > 0) state.steps.toString() else "—", Modifier.weight(1f)) }
+            HealthMetric("Calorias", if (state.calories > 0) "${state.calories.toInt()} kcal" else "—", Modifier.fillMaxWidth())
+        }
+    }
+}
+@Composable private fun HealthMetric(label: String, value: String, modifier: Modifier) { Column(modifier) { Text(label, color = Muted, fontSize = 11.sp); Text(value, color = Accent, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold) } }
 
 @Composable
 private fun MatchStatsTable(record: PhoneRecord) {
@@ -389,7 +411,24 @@ private fun createMatchImage(context: Context, record: PhoneRecord): File {
         text("${state.gamesA}-${state.gamesB} · $pa-$pb", 540f, y, 32f, android.graphics.Color.rgb(78, 179, 211), true, Paint.Align.CENTER)
         text(formatDuration((record.endedAt - state.setStartedAt).coerceAtLeast(0)), 960f, y, 32f, android.graphics.Color.rgb(78, 179, 211), true, Paint.Align.RIGHT)
     }
-    text("${state.gameDurations.size} games jugados", 540f, 1215f, 28f, android.graphics.Color.rgb(165, 176, 189), align = Paint.Align.CENTER)
+    text("${state.gameDurations.size} games jugados", 540f, 1025f, 27f, android.graphics.Color.rgb(165, 176, 189), align = Paint.Align.CENTER)
+    paint.color = android.graphics.Color.rgb(21, 31, 42)
+    canvas.drawRoundRect(96f, 1060f, 984f, 1260f, 20f, 20f, paint)
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 2f
+    paint.color = android.graphics.Color.rgb(52, 66, 80)
+    canvas.drawRoundRect(96f, 1060f, 984f, 1260f, 20f, 20f, paint)
+    paint.style = Paint.Style.FILL
+    text("ACTIVIDAD", 128f, 1110f, 25f, android.graphics.Color.WHITE, true)
+    fun metric(label: String, value: String, x: Float, labelY: Float, align: Paint.Align = Paint.Align.LEFT) {
+        text(label, x, labelY, 19f, android.graphics.Color.rgb(165, 176, 189), true, align)
+        text(value, x, labelY + 35f, 28f, android.graphics.Color.rgb(78, 179, 211), true, align)
+    }
+    metric("RITMO PROMEDIO", if (state.averageHeartRate > 0) "${state.averageHeartRate.toInt()} ppm" else "-", 128f, 1150f)
+    metric("RITMO MAXIMO", if (state.maxHeartRate > 0) "${state.maxHeartRate.toInt()} ppm" else "-", 540f, 1150f, Paint.Align.CENTER)
+    metric("DISTANCIA", if (state.distanceMeters > 0) "%s%.2f km".format(if (state.distanceEstimated) "~" else "", state.distanceMeters / 1000) else "-", 952f, 1150f, Paint.Align.RIGHT)
+    metric("PASOS", if (state.steps > 0) state.steps.toString() else "-", 128f, 1215f)
+    metric("CALORIAS", if (state.calories > 0) "${state.calories.toInt()} kcal" else "-", 952f, 1215f, Paint.Align.RIGHT)
     val directory = File(context.cacheDir, "shared_matches").apply { mkdirs() }; val file = File(directory, "punto-padel-${record.endedAt}.png")
     FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle()
     return file

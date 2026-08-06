@@ -36,6 +36,12 @@ data class MatchState(
     val setDurations: List<Long> = emptyList(),
     val gameDurations: List<Long> = emptyList(),
     val setScores: List<String> = emptyList(),
+    val averageHeartRate: Double = 0.0,
+    val maxHeartRate: Double = 0.0,
+    val distanceMeters: Double = 0.0,
+    val calories: Double = 0.0,
+    val steps: Long = 0,
+    val distanceEstimated: Boolean = false,
 ) {
     val tieBreak: Boolean get() = gamesA == 6 && gamesB == 6
 }

@@ -1,14 +1,19 @@
 package com.ezequiel.padelcounter
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
+import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -35,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import org.json.JSONObject
@@ -55,6 +61,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         migratePalette()
+        val healthPermission = if (Build.VERSION.SDK_INT >= 36) "android.permission.health.READ_HEART_RATE" else Manifest.permission.BODY_SENSORS
+        val missingPermissions = listOf(healthPermission, Manifest.permission.ACTIVITY_RECOGNITION).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missingPermissions.isNotEmpty()) ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), 72)
         val openLatest = prefs.getBoolean("open_latest_detail", false)
         prefs.edit().remove("open_latest_detail").apply()
         setContent { MaterialTheme { PadelApp(loadSaved(), loadHistory(), openLatest, ::save, ::saveHistory) } }
@@ -115,7 +124,9 @@ private fun savedFromJson(json: JSONObject) = SavedMatch(
         setStartedAt = json.optLong("setStartedAt", json.optLong("startedAt", System.currentTimeMillis())),
         gameStartedAt = json.optLong("gameStartedAt", json.optLong("startedAt", System.currentTimeMillis())),
         setDurations = json.optJSONArray("setDurations").toLongList(), gameDurations = json.optJSONArray("gameDurations").toLongList(),
-        setScores = json.optJSONArray("setScores").toStringList()
+        setScores = json.optJSONArray("setScores").toStringList(), averageHeartRate = json.optDouble("hrAvg", 0.0),
+        maxHeartRate = json.optDouble("hrMax", 0.0), distanceMeters = json.optDouble("distance", 0.0), calories = json.optDouble("calories", 0.0),
+        steps = json.optLong("steps", 0), distanceEstimated = json.optBoolean("distanceEstimated", false)
     )
 )
 
@@ -129,6 +140,7 @@ data class SavedMatch(val config: MatchConfig, val state: MatchState) {
         put("completedGames", state.completedGames)
         put("startedAt", state.startedAt); put("setStartedAt", state.setStartedAt); put("gameStartedAt", state.gameStartedAt)
         put("setDurations", JSONArray(state.setDurations)); put("gameDurations", JSONArray(state.gameDurations)); put("setScores", JSONArray(state.setScores))
+        put("hrAvg", state.averageHeartRate); put("hrMax", state.maxHeartRate); put("distance", state.distanceMeters); put("calories", state.calories); put("steps", state.steps); put("distanceEstimated", state.distanceEstimated)
     }
 }
 
@@ -156,6 +168,7 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
     var selectedRecord by remember { mutableStateOf<Int?>(if (openLatest && initialHistory.isNotEmpty()) 0 else null) }
     var locked by remember { mutableStateOf(false) }
     val view = LocalView.current
+    val context = LocalContext.current
 
     Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
         when (screen) {
@@ -168,6 +181,8 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
                 state = MatchState()
                 history.clear()
                 persist(SavedMatch(started, state))
+                HealthMetricsStore.reset(context)
+                androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, HealthTrackingService::class.java))
                 screen = "score"
             })
             "teams" -> TeamsScreen(config, { config = it }, { screen = "setup" })
@@ -182,10 +197,12 @@ private fun PadelApp(initial: SavedMatch?, initialHistory: List<HistoryRecord>, 
             "confirm" -> ConfirmScreen(
                 onCancel = { screen = "score" },
                 onConfirm = {
-                    records.add(0, HistoryRecord(System.currentTimeMillis(), SavedMatch(config, state.copy(finished = true))))
+                    val finalState = HealthMetricsStore.apply(context, state).copy(finished = true)
+                    records.add(0, HistoryRecord(System.currentTimeMillis(), SavedMatch(config, finalState)))
                     persistHistory(records.toList())
                     selectedRecord = 0
                     persist(null); config = MatchConfig(); state = MatchState(); history.clear(); locked = false
+                    context.startService(Intent(context, HealthTrackingService::class.java).setAction("STOP"))
                     screen = "detail"
                 }
             )
@@ -227,6 +244,13 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, team
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Saque", color = Muted, fontSize = 10.sp, modifier = Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Choice("A", config.initialServerA) { update(config.copy(initialServerA = true)) }
+                Choice("B", !config.initialServerA) { update(config.copy(initialServerA = false)) }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Ventaja", color = Muted, fontSize = 10.sp, maxLines = 1, modifier = Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Choice("SI", config.advantage) { update(config.copy(advantage = true)) }
@@ -238,13 +262,6 @@ private fun SetupScreen(config: MatchConfig, update: (MatchConfig) -> Unit, team
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Choice("1v1", !config.doubles) { update(config.copy(doubles = false)) }
                 Choice("2v2", config.doubles) { update(config.copy(doubles = true)) }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Saque", color = Muted, fontSize = 10.sp, modifier = Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Choice("A", config.initialServerA) { update(config.copy(initialServerA = true)) }
-                Choice("B", !config.initialServerA) { update(config.copy(initialServerA = false)) }
             }
         }
         Box(
@@ -329,6 +346,7 @@ private fun GlobalStatsWatch(records: List<HistoryRecord>, back: () -> Unit) {
     val wins = records.count { it.saved.state.setsA > it.saved.state.setsB }; val losses = records.count { it.saved.state.setsA < it.saved.state.setsB }; val draws = records.size - wins - losses
     val setsA = records.sumOf { it.saved.state.setsA }; val setsB = records.sumOf { it.saved.state.setsB }; val games = records.sumOf { it.saved.state.completedGames }
     val total = records.sumOf { (it.endedAt - it.saved.state.startedAt).coerceAtLeast(0) }
+    val health = records.map { it.saved.state }.filter { it.averageHeartRate > 0 || it.distanceMeters > 0 || it.calories > 0 || it.steps > 0 }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("<  RESUMEN", color = Lime, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = back).padding(3.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -339,6 +357,10 @@ private fun GlobalStatsWatch(records: List<HistoryRecord>, back: () -> Unit) {
         Text("$games GAMES", color = Muted, fontSize = 9.sp)
         Text("TOTAL  ${formatDuration(total)}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         Text("PROM.  ${formatDuration(if (records.isEmpty()) 0 else total / records.size)}", color = Muted, fontSize = 9.sp)
+        if (health.isNotEmpty()) {
+            Text("FC ${health.map { it.averageHeartRate }.filter { it > 0 }.average().toInt()} PPM", color = Lime, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text("%.2f KM · %d PASOS".format(health.sumOf { it.distanceMeters } / 1000, health.sumOf { it.steps }), color = Muted, fontSize = 8.sp)
+        }
     }
 }
 
@@ -377,6 +399,8 @@ private fun HistoryDetail(record: HistoryRecord, onUpdate: (HistoryRecord) -> Un
         }
         val games = saved.state.gameDurations
         if (games.isNotEmpty()) Text("${games.size} games · Prom. ${formatDuration(games.average().toLong())}", color = Muted, fontSize = 9.sp)
+        if (saved.state.averageHeartRate > 0) Text("FC ${saved.state.averageHeartRate.toInt()} · MAX ${saved.state.maxHeartRate.toInt()} PPM", color = Lime, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        if (saved.state.distanceMeters > 0 || saved.state.steps > 0) Text("%s%.2f KM · %d PASOS".format(if (saved.state.distanceEstimated) "~" else "", saved.state.distanceMeters / 1000, saved.state.steps), color = Muted, fontSize = 8.sp)
         Box(
             Modifier.fillMaxWidth(.72f).height(23.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF512326)).clickable {
                 if (confirmDelete) onDelete() else confirmDelete = true

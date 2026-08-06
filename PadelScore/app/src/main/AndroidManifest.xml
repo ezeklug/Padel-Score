@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.BODY_SENSORS" android:maxSdkVersion="35" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <uses-feature android:name="android.hardware.type.watch" />
 
     <application
@@ -27,5 +32,6 @@
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/padel" />
             </intent-filter>
         </service>
+        <service android:name=".HealthTrackingService" android:exported="false" android:foregroundServiceType="health" />
     </application>
 </manifest>

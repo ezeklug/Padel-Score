@@ -13,6 +13,7 @@ Aplicacion Android para llevar el tanteo de padel o tenis desde un telefono y un
 - Recuperacion del partido si una app se cierra.
 - Historial con fecha, resultados y tiempos por set y game.
 - Imagen de estadisticas para guardar o compartir.
+- Registro opcional desde el reloj de ritmo cardiaco, distancia estimada y calorias mediante Wear OS Health Services.
 - Sincronizacion bidireccional entre reloj y telefono.
 
 ## Modulos
@@ -27,6 +28,8 @@ Aplicacion Android para llevar el tanteo de padel o tenis desde un telefono y un
 - Android SDK 36.
 - Telefono Android con Google Play Services.
 - Reloj Wear OS emparejado con el telefono.
+
+Al abrir la app del reloj se solicitan permisos de actividad y ritmo cardiaco. Si se rechazan, el tanteador sigue funcionando, pero el historial no incluye esas metricas.
 
 ## Ejecutar
 
