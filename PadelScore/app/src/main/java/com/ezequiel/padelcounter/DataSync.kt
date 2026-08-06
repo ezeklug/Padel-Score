@@ -17,7 +17,7 @@ const val ACTION_SYNCED = "com.ezequiel.padelcounter.SYNCED"
 object DataSync {
     fun publish(context: Context) {
         val prefs = context.getSharedPreferences("match", Context.MODE_PRIVATE)
-        val updatedAt = System.currentTimeMillis()
+        val updatedAt = maxOf(System.currentTimeMillis(), prefs.getLong("sync_updated", 0L) + 1L)
         prefs.edit().putLong("sync_updated", updatedAt).apply()
         val request = PutDataMapRequest.create(SYNC_PATH).apply {
             dataMap.putString("current", prefs.getString("current", null) ?: "")
@@ -38,9 +38,11 @@ class PadelDataListenerService : WearableListenerService() {
             if (remoteUpdated <= prefs.getLong("sync_updated", 0L)) return@forEach
             val remoteCurrent = map.getString("current") ?: ""
             var remoteHistory = map.getString("history") ?: "[]"
+            val previousHistory = prefs.getString("history", "[]") ?: "[]"
             val hadCurrent = !prefs.getString("current", null).isNullOrBlank()
             val matchJustStarted = !hadCurrent && remoteCurrent.isNotBlank()
             val matchJustEnded = hadCurrent && remoteCurrent.isBlank()
+            val newFinishedRecord = latestEndedAt(remoteHistory) != null && latestEndedAt(remoteHistory) != latestEndedAt(previousHistory)
             if (matchJustEnded) {
                 val metrics = HealthMetricsStore.apply(this, MatchState())
                 remoteHistory = runCatching { JSONArray(remoteHistory).also { array -> if (array.length() > 0) array.getJSONObject(0).apply { put("hrAvg", metrics.averageHeartRate); put("hrMax", metrics.maxHeartRate); put("distance", metrics.distanceMeters); put("calories", metrics.calories); put("steps", metrics.steps); put("distanceEstimated", metrics.distanceEstimated) } }.toString() }.getOrDefault(remoteHistory)
@@ -48,7 +50,7 @@ class PadelDataListenerService : WearableListenerService() {
             prefs.edit().apply {
                 if (remoteCurrent.isBlank()) remove("current") else putString("current", remoteCurrent)
                 putString("history", remoteHistory)
-                if (matchJustEnded) putBoolean("open_latest_detail", true)
+                if (matchJustEnded || newFinishedRecord) putBoolean("open_latest_detail", true)
                 putLong("sync_updated", remoteUpdated)
             }.apply()
             if (matchJustStarted) {
@@ -57,7 +59,13 @@ class PadelDataListenerService : WearableListenerService() {
             }
             if (matchJustEnded) startService(Intent(this, HealthTrackingService::class.java).setAction("STOP"))
             if (matchJustEnded) DataSync.publish(this)
-            sendBroadcast(Intent(ACTION_SYNCED).setPackage(packageName))
+            if (remoteCurrent.isNotBlank() || matchJustStarted || matchJustEnded || newFinishedRecord) {
+                sendBroadcast(Intent(ACTION_SYNCED).setPackage(packageName))
+            }
         }
     }
+
+    private fun latestEndedAt(raw: String): Long? = runCatching {
+        JSONArray(raw).takeIf { it.length() > 0 }?.getJSONObject(0)?.optLong("endedAt")
+    }.getOrNull()
 }

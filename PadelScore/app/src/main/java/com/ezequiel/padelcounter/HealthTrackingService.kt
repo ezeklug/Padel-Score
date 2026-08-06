@@ -60,7 +60,9 @@ class HealthTrackingService : Service(), SensorEventListener {
         override fun onLapSummaryReceived(lapSummary: ExerciseLapSummary) = Unit
         override fun onAvailabilityChanged(dataType: DataType<*, *>, availability: Availability) = Unit
         override fun onRegistered() = Unit
-        override fun onRegistrationFailed(throwable: Throwable) = stopSelf()
+        override fun onRegistrationFailed(throwable: Throwable) {
+            getSharedPreferences("health_metrics", MODE_PRIVATE).edit().putString("error", "callback: ${throwable.message}").apply()
+        }
     }
 
     override fun onCreate() {
@@ -68,7 +70,7 @@ class HealthTrackingService : Service(), SensorEventListener {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("match_tracking", "Partido activo", NotificationManager.IMPORTANCE_LOW))
         val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        startForeground(41, NotificationCompat.Builder(this, "match_tracking").setSmallIcon(com.ezequiel.padelcounter.R.drawable.ic_launcher).setContentTitle("Punto Padel").setContentText("Registrando actividad del partido").setContentIntent(pending).setOngoing(true).build())
+        startForeground(41, NotificationCompat.Builder(this, "match_tracking").setSmallIcon(com.ezequiel.padelcounter.R.drawable.ic_launcher).setContentTitle("Tanteo").setContentText("Registrando actividad del partido").setContentIntent(pending).setOngoing(true).build())
         startStepTracking()
         exerciseClient.setUpdateCallback(callback)
         startExercise()
@@ -81,9 +83,17 @@ class HealthTrackingService : Service(), SensorEventListener {
             counter != null -> sensorManager.registerListener(this, counter, SensorManager.SENSOR_DELAY_NORMAL)
             detector != null -> sensorManager.registerListener(this, detector, SensorManager.SENSOR_DELAY_NORMAL)
         }
+        sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)?.let { heartRate ->
+            sensorManager.registerListener(this, heartRate, SensorManager.SENSOR_DELAY_NORMAL)
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
+            val heartRate = event.values.firstOrNull()?.toDouble() ?: return
+            if (heartRate > 0) HealthMetricsStore.record(this, listOf(heartRate), null, null, null)
+            return
+        }
         val steps = when (event.sensor.type) {
             Sensor.TYPE_STEP_COUNTER -> {
                 val current = event.values.firstOrNull() ?: return
@@ -112,7 +122,9 @@ class HealthTrackingService : Service(), SensorEventListener {
                 val config = ExerciseConfig(type, requested, false, false)
                 exerciseClient.startExerciseAsync(config)
             }
-            override fun onFailure(t: Throwable) = stopSelf()
+            override fun onFailure(t: Throwable) {
+                getSharedPreferences("health_metrics", MODE_PRIVATE).edit().putString("error", "exercise: ${t.message}").apply()
+            }
         }, MoreExecutors.directExecutor())
     }
 

@@ -10,6 +10,18 @@ fun formatTeamNameInput(value: String, maxLength: Int = 24): String {
     }
 }
 
+enum class Sport(val displayName: String) {
+    PADEL("Padel"),
+    TENNIS("Tenis"),
+    FOOTBALL_5("Futbol 5"),
+    FOOTBALL_7("Futbol 7"),
+    FOOTBALL_11("Futbol 11");
+
+    val isFootball: Boolean get() = name.startsWith("FOOTBALL")
+    val familyName: String get() = if (isFootball) "Futbol" else displayName
+    val teamSize: Int get() = when (this) { FOOTBALL_5 -> 5; FOOTBALL_7 -> 7; FOOTBALL_11 -> 11; else -> 0 }
+}
+
 data class MatchConfig(
     val teamA: String = "Mi Equipo",
     val teamB: String = "Rival",
@@ -19,7 +31,13 @@ data class MatchConfig(
     val colorB: Int = 1,
     val doubles: Boolean = true,
     val initialServerA: Boolean = true,
+    val sport: Sport = Sport.PADEL,
+    val userPlayer: String = "Yo",
+    val teamAPlayers: List<String> = emptyList(),
+    val teamBPlayers: List<String> = emptyList(),
 )
+
+data class GoalEvent(val teamA: Boolean, val elapsedMillis: Long)
 
 data class MatchState(
     val pointsA: Int = 0,
@@ -42,6 +60,7 @@ data class MatchState(
     val calories: Double = 0.0,
     val steps: Long = 0,
     val distanceEstimated: Boolean = false,
+    val goalEvents: List<GoalEvent> = emptyList(),
 ) {
     val tieBreak: Boolean get() = gamesA == 6 && gamesB == 6
 }

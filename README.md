@@ -1,19 +1,34 @@
-# Punto Padel
+# Tanteo
 
-Aplicacion Android para llevar el tanteo de padel o tenis desde un telefono y un reloj Wear OS.
+Aplicacion Android multideporte para registrar partidos desde un telefono y un reloj Wear OS.
 
 ## Funciones
 
+- Seleccion de padel, tenis, futbol 5, futbol 7 o futbol 11.
+- Historial y resumen global independientes para cada deporte.
+- Tanteador de goles y cronometro libre para futbol.
+- Cronologia de goles con marcador acumulado y precision de minutos y segundos.
+- Planteles configurables de 5, 7 u 11 jugadores desde el telefono, con catalogos de nombres independientes para padel, tenis y futbol.
+- Integrantes configurables tambien para padel y tenis: usuario, companeros y rivales, sin nombres personalizados para los equipos.
+- Los integrantes pueden completarse o corregirse desde el telefono despues de finalizar el partido.
+- Administracion global del catalogo para eliminar companeros o rivales cargados incorrectamente.
+- Estadisticas por compañeros y rivales en el resumen global de futbol.
+- Graficos historicos de ritmo cardiaco y distancia recorrida.
+- Selector de deporte persistente en el telefono y pantalla inicial de deportes en el reloj.
+- Deportes configurables como visibles u ocultos y cambio rapido mediante deslizamiento horizontal en el telefono.
+- Colores fijos: rojo para Mi Equipo y azul para Rival.
 - Partidos de 1, 3 o 5 sets y modo libre sin cantidad predeterminada.
 - Cierre manual con empates, sets, games o puntos inconclusos.
 - Game con ventaja o punto de oro y tie-break automatico.
-- Modalidad individual o dobles, nombres y colores configurables.
+- Modalidad individual o dobles e integrantes configurables.
 - Indicacion del equipo y jugador que saca.
 - Deshacer puntos, vibraciones y bloqueo de controles en el reloj.
 - Recuperacion del partido si una app se cierra.
 - Historial con fecha, resultados y tiempos por set y game.
+- Carga manual de partidos anteriores para cualquier deporte, con fecha, resultado, duracion, equipos y planteles; las metricas de salud quedan sin medicion.
 - Imagen de estadisticas para guardar o compartir.
-- Registro opcional desde el reloj de ritmo cardiaco, distancia estimada y calorias mediante Wear OS Health Services.
+- Imagen del resumen estadistico global para guardar o compartir.
+- Registro para todos los deportes desde el reloj de ritmo cardiaco, distancia estimada, pasos y calorias mediante Wear OS Health Services.
 - Sincronizacion bidireccional entre reloj y telefono.
 
 ## Modulos
