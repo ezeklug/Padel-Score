@@ -34,3 +34,4 @@ El Watch4 usa Wear OS y puede recibir la app directamente desde Android Studio.
 6. Seleccionar el reloj en la barra superior de Android Studio y pulsar **Run**. La app quedara instalada en el menu del reloj.![alt text](image.png)
 
 Para generar un APK manual: **Build > Build App Bundles or APKs > Build APKs**. Luego se puede instalar con `adb install app-debug.apk` mientras el reloj esta conectado.
+
