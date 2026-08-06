@@ -10,13 +10,16 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -42,7 +45,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -58,6 +60,7 @@ import com.ezequiel.padelcounter.MatchState
 import com.ezequiel.padelcounter.Sport
 import com.ezequiel.padelcounter.formatTeamNameInput
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.io.File
 import java.io.FileOutputStream
@@ -177,19 +180,37 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
     var showSportSettings by remember { mutableStateOf(false) }
     val hiddenSports = remember { mutableStateListOf<String>().apply { addAll(initialHiddenSports) } }
     val visibleSports = listOf(Sport.PADEL, Sport.TENNIS, Sport.FOOTBALL_5).filterNot { it.familyName in hiddenSports }.ifEmpty { listOf(Sport.PADEL) }
-    fun selectSport(sport: Sport) {
+    val pagerState = rememberPagerState(
+        initialPage = visibleSports.indexOfFirst { if (it.isFootball) config.sport.isFootball else it == config.sport }.coerceAtLeast(0),
+        pageCount = { visibleSports.size }
+    )
+    val scope = rememberCoroutineScope()
+    fun applySport(sport: Sport) {
+        if (sport.familyName == config.sport.familyName) return
         config = normalizeRoster(MatchConfig(sport = sport, colorA = 0, colorB = 1))
         detailIndex = null; showGlobal = false; showManual = false
     }
-    fun swipeSport(direction: Int) {
-        if (current != null || visibleSports.size < 2) return
-        val currentIndex = visibleSports.indexOfFirst { if (it.isFootball) config.sport.isFootball else it == config.sport }.coerceAtLeast(0)
-        selectSport(visibleSports[(currentIndex + direction + visibleSports.size) % visibleSports.size])
+    fun selectSport(sport: Sport) {
+        if (current != null) return
+        val target = visibleSports.indexOfFirst { if (it.isFootball) sport.isFootball else it == sport }
+        if (target >= 0) scope.launch { pagerState.animateScrollToPage(target) }
     }
-    LaunchedEffect(Unit) {
-        if (current == null && config.sport.familyName in hiddenSports) selectSport(visibleSports.first())
+    LaunchedEffect(pagerState.settledPage, visibleSports.map { it.familyName }) {
+        visibleSports.getOrNull(pagerState.settledPage)?.let(::applySport)
     }
     val undo = remember { mutableStateListOf<MatchState>() }
+
+    BackHandler(enabled = true) {
+        when {
+            detailIndex != null -> detailIndex = null
+            showGlobal -> showGlobal = false
+            showManual -> showManual = false
+            tab == 2 -> tab = if (current != null) 1 else 0
+            tab == 0 && current != null -> tab = 1
+            tab == 1 && current == null -> tab = 0
+            else -> Unit
+        }
+    }
 
     Scaffold(
         containerColor = Canvas,
@@ -204,7 +225,13 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
                         }
                     }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Panel)
                 )
-                SportNavigation(config.sport, visibleSports, current == null, ::selectSport)
+                SportNavigation(
+                    config.sport,
+                    visibleSports,
+                    current == null,
+                    pagerState.currentPage + pagerState.currentPageOffsetFraction,
+                    ::selectSport
+                )
             }
         },
         bottomBar = {
@@ -215,17 +242,17 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
             }
         }
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding).background(Canvas).pointerInput(current, visibleSports) {
-            var drag = 0f
-            detectHorizontalDragGestures(
-                onDragStart = { drag = 0f },
-                onHorizontalDrag = { _, amount -> drag += amount },
-                onDragEnd = { if (drag < -80f) swipeSport(1) else if (drag > 80f) swipeSport(-1) }
-            )
-        }) {
-            when {
-                tab == 0 -> SetupPhone(config, { config = it }, players, ::rememberPlayer) {
-                    val fixed = normalizeRoster(config.copy(teamA = "Mi Equipo", teamB = "Rival", colorA = 0, colorB = 1))
+        HorizontalPager(
+            state = pagerState,
+            userScrollEnabled = current == null,
+            modifier = Modifier.fillMaxSize().padding(padding).background(Canvas)
+        ) { page ->
+            val pageSport = visibleSports[page]
+            val pageConfig = if (pageSport.familyName == config.sport.familyName) config else normalizeRoster(MatchConfig(sport = pageSport, colorA = 0, colorB = 1))
+            val pagePlayers = catalogs.getValue(pageSport.familyName)
+              when {
+                tab == 0 -> SetupPhone(pageConfig, { if (page == pagerState.settledPage) config = it }, pagePlayers, ::rememberPlayer) {
+                    val fixed = normalizeRoster(pageConfig.copy(teamA = "Mi Equipo", teamB = "Rival", colorA = 0, colorB = 1))
                     (fixed.teamAPlayers + fixed.teamBPlayers).forEach(::rememberPlayer)
                     config = fixed; current = PhoneMatch(fixed, MatchState()); undo.clear(); persist(current, records); tab = 1
                 }
@@ -253,11 +280,11 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
                         undo = { if (undo.isNotEmpty()) { current = match.copy(state = undo.removeAt(undo.lastIndex)); persist(current, records) } },
                         finish = finishMatch)
                 } ?: EmptyScore { tab = 0 }
-                showManual -> ManualMatchScreen(config.sport, players, ::rememberPlayer, { showManual = false }) { record ->
+                showManual -> ManualMatchScreen(pageSport, pagePlayers, ::rememberPlayer, { showManual = false }) { record ->
                     records.add(record); records.sortByDescending { it.endedAt }; persist(current, records); showManual = false
                     detailIndex = records.indexOfFirst { it.endedAt == record.endedAt }
                 }
-                detailIndex != null -> DetailPhone(records[detailIndex!!], players, ::rememberPlayer,
+                detailIndex != null -> DetailPhone(records[detailIndex!!], pagePlayers, ::rememberPlayer,
                     update = {
                         records[detailIndex!!] = it
                         records.sortByDescending { record -> record.endedAt }
@@ -267,14 +294,14 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
                     delete = { records.removeAt(detailIndex!!); persist(current, records); detailIndex = null },
                     back = { detailIndex = null })
                 showGlobal -> GlobalStatsPhone(
-                    records.filter { if (config.sport.isFootball) it.match.config.sport.isFootball else it.match.config.sport == config.sport },
-                    config.sport,
-                    players,
+                    records.filter { if (pageSport.isFootball) it.match.config.sport.isFootball else it.match.config.sport == pageSport },
+                    pageSport,
+                    pagePlayers,
                     deletePlayer = { name ->
                         players.removeAll { it.equals(name, true) }; saveCatalogs()
                         records.indices.forEach { index ->
                             val match = records[index].match; val c = match.config
-                            if (c.sport.familyName != config.sport.familyName) return@forEach
+                            if (c.sport.familyName != pageSport.familyName) return@forEach
                             val userDeleted = c.userPlayer.equals(name, true)
                             val updated = c.copy(
                                 userPlayer = if (userDeleted) "Yo" else c.userPlayer,
@@ -285,7 +312,7 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
                         }
                         current = current?.let { match ->
                             val c = match.config
-                            if (c.sport.familyName != config.sport.familyName) return@let match
+                            if (c.sport.familyName != pageSport.familyName) return@let match
                             val userDeleted = c.userPlayer.equals(name, true)
                             match.copy(config = c.copy(
                                 userPlayer = if (userDeleted) "Yo" else c.userPlayer,
@@ -297,13 +324,13 @@ private fun PhoneApp(initial: PhoneMatch?, initialHistory: List<PhoneRecord>, in
                         }
                         persist(current, records)
                     }, back = { showGlobal = false })
-                else -> HistoryPhone(records, config.sport, { detailIndex = it }, { showGlobal = true }) { showManual = true }
-            }
+                else -> HistoryPhone(records, pageSport, { detailIndex = it }, { showGlobal = true }) { showManual = true }
+              }
         }
     }
     if (showSportSettings) SportVisibilityDialog(hiddenSports, {
         hiddenSports.clear(); hiddenSports.addAll(it); saveHiddenSports(it)
-        if (config.sport.familyName in it) selectSport(listOf(Sport.PADEL, Sport.TENNIS, Sport.FOOTBALL_5).first { sport -> sport.familyName !in it })
+        if (config.sport.familyName in it) applySport(listOf(Sport.PADEL, Sport.TENNIS, Sport.FOOTBALL_5).first { sport -> sport.familyName !in it })
         showSportSettings = false
     }) { showSportSettings = false }
 }
@@ -315,19 +342,32 @@ private fun navColors() = NavigationBarItemDefaults.colors(
 )
 
 @Composable
-private fun SportNavigation(selected: Sport, sports: List<Sport>, enabled: Boolean, update: (Sport) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 18.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-        sports.forEach { sport ->
-            SportTab(sport.familyName, if (sport.isFootball) selected.isFootball else selected == sport, enabled) { update(if (sport.isFootball && selected.isFootball) selected else sport) }
+private fun SportNavigation(selected: Sport, sports: List<Sport>, enabled: Boolean, pagerPosition: Float, update: (Sport) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 18.dp)) {
+        val tabWidth = maxWidth / sports.size
+        val indicatorWidth = tabWidth * .62f
+        val boundedPosition = pagerPosition.coerceIn(0f, (sports.size - 1).toFloat())
+        Row(Modifier.fillMaxSize()) {
+            sports.forEachIndexed { index, sport ->
+                val active = kotlin.math.abs(boundedPosition - index) < .5f
+                val labelColor by animateColorAsState(if (active) Ink else Muted, label = "Color de deporte")
+                Box(
+                    Modifier.weight(1f).fillMaxHeight().clickable(enabled = enabled) {
+                        update(if (sport.isFootball && selected.isFootball) selected else sport)
+                    },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(sport.familyName, color = labelColor, fontSize = 13.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium)
+                }
+            }
         }
-    }
-}
-
-@Composable
-private fun RowScope.SportTab(label: String, selected: Boolean, enabled: Boolean, click: () -> Unit) {
-    Column(Modifier.weight(1f).fillMaxHeight().clickable(enabled = enabled, onClick = click), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(label, color = if (selected) Ink else Muted, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
-        Spacer(Modifier.height(8.dp)); Box(Modifier.fillMaxWidth(.62f).height(3.dp).background(if (selected) Accent else Color.Transparent, CircleShape))
+        Box(
+            Modifier
+                .offset(x = tabWidth * boundedPosition + (tabWidth - indicatorWidth) / 2, y = 45.dp)
+                .width(indicatorWidth)
+                .height(3.dp)
+                .background(Accent, CircleShape)
+        )
     }
 }
 
